@@ -1,6 +1,6 @@
 import { mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { join, dirname, resolve, sep } from 'node:path';
-import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, DeleteObjectCommand, PutBucketCorsCommand } from '@aws-sdk/client-s3';
 
 // Two backends with the same tiny interface:
 //  - local disk (development): files under MEDIA_DIR, served by the app at /media/<key>
@@ -29,11 +29,30 @@ export async function put(key, bytes, contentType) {
     await s3.send(new PutObjectCommand({
       Bucket: process.env.S3_BUCKET, Key: key, Body: bytes, ContentType: contentType,
       ACL: 'public-read', CacheControl: 'public, max-age=31536000, immutable',
+      // Optional cheaper class, e.g. ONEZONE_IA (Scaleway One Zone). Unset = Standard.
+      ...(process.env.S3_STORAGE_CLASS ? { StorageClass: process.env.S3_STORAGE_CLASS } : {}),
     }));
   } else {
     const path = localPath(key);
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, bytes);
+  }
+}
+
+// The leaf card uses the cut-out as a CSS mask, and browsers only allow that for cross-origin
+// images when the bucket answers with CORS headers. The Scaleway console has no CORS setting,
+// so the app sets it itself at startup. Images are public anyway, so any origin may GET them.
+export async function ensureBucketCors() {
+  if (!useS3) return;
+  try {
+    await s3.send(new PutBucketCorsCommand({
+      Bucket: process.env.S3_BUCKET,
+      CORSConfiguration: {
+        CORSRules: [{ AllowedOrigins: ['*'], AllowedMethods: ['GET', 'HEAD'], AllowedHeaders: ['*'], MaxAgeSeconds: 86400 }],
+      },
+    }));
+  } catch (err) {
+    console.warn(`Could not set bucket CORS (${err.name || err.message}); leaf card backs may not show.`);
   }
 }
 

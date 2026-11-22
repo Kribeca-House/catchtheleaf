@@ -3,6 +3,7 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import { readFile } from 'node:fs/promises';
 import { createApp } from './app.js';
 import { migrate } from './db.js';
+import { ensureBucketCors } from './storage.js';
 
 // One container serves the API and the built web app, so there is only one thing to deploy.
 // Set STATIC_DIR to the web build (the Dockerfile does this).
@@ -10,6 +11,7 @@ const STATIC_DIR = process.env.STATIC_DIR || '../web/dist';
 const port = Number(process.env.PORT || 8080);
 
 await migrate();
+ensureBucketCors(); // not awaited: never slows a cold start
 const app = createApp();
 
 app.use('/assets/*', serveStatic({ root: STATIC_DIR }));

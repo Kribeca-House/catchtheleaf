@@ -53,8 +53,9 @@ Create the test database once: `docker compose exec db createdb -U postgres catc
 1. **Database:** create a Serverless SQL Database. Copy its connection string into `DATABASE_URL` and set
    `DATABASE_SSL=true`.
 2. **Bucket:** create an Object Storage bucket (e.g. `catch-the-leaf-media` in `fr-par`). Create an API key
-   with Object Storage access for `S3_ACCESS_KEY` / `S3_SECRET_KEY`. Add a CORS rule allowing `GET` from
-   your app's domain (the leaf card uses the cut-out as a CSS mask, which needs CORS).
+   with Object Storage access for `S3_ACCESS_KEY` / `S3_SECRET_KEY`. The app sets the bucket's CORS rule
+   itself at startup (the leaf card uses the cut-out as a CSS mask, which needs CORS). Optional: set
+   `S3_STORAGE_CLASS=ONEZONE_IA` for cheaper One Zone storage.
 3. **Image:** create a Container Registry namespace, then:
    ```sh
    docker build -t rg.fr-par.scw.cloud/<namespace>/catch-the-leaf:latest .
