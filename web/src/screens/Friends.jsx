@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, displayName } from '../api.js';
 import { useSession } from '../App.jsx';
+import { ask } from '../dialog.jsx';
 import { Empty, ErrorNote, Icon, PlayerLink, TopBar } from '../ui.jsx';
 
 function PersonRow({ user, children }) {
@@ -48,7 +49,7 @@ export function Friends({ username }) {
 
   async function leave(g) {
     const note = g.is_owner && g.size > 1 ? ' Someone else in it becomes the owner.' : '';
-    if (!window.confirm(`Leave ${g.name}?${note}`)) return;
+    if (!(await ask({ message: `Leave ${g.name}?${note}`, confirmLabel: 'Leave' }))) return;
     try { await api(`/groups/${g.id}/leave`, { method: 'POST' }); load(); } catch (e) { setError(e.message); }
   }
 

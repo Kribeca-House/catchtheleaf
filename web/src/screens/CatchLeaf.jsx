@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, COMMON_TREES, formatDate } from '../api.js';
-import { go, useSession } from '../App.jsx';
+import { useSession } from '../App.jsx';
+import { go } from '../nav.js';
+import { tell } from '../dialog.jsx';
 import { cutOutLeaf, photoAsCutout } from '../cutout.js';
 import { photoTakenAt } from '../exif.js';
 import { ErrorNote, Icon, TopBar } from '../ui.jsx';
@@ -78,7 +80,7 @@ export function CatchLeaf() {
     if (takenAt) form.append('caught_at', takenAt.date.toISOString());
     try {
       const d = await api('/leaves', { method: 'POST', form });
-      if (!d.counted) window.alert("Saved! It's outside the season, so it won't count on this season's boards.");
+      if (!d.counted) await tell("Saved! It was caught outside the season, so it won't count on the boards.");
       go(`/u/${user.username}`);
     } catch (err) { setError(err.message); setStep('details'); }
   }
@@ -125,7 +127,7 @@ export function CatchLeaf() {
           {ident.loading && <p className="muted">Looking it up…</p>}
           {!ident.loading && ident.suggestions?.length > 0 && (
             <div className="suggestions">
-              <span className="muted">Our guesses. Tap one, or type your own if you know better:</span>
+              <span className="muted">{ident.demo ? 'Sample guesses (the preview has no tree recognition).' : 'Our guesses.'} Tap one, or type your own if you know better:</span>
               <div className="chips">
                 {ident.suggestions.map((s) => (
                   <button type="button" key={s.scientific || s.name} className={tree.name === s.name ? 'chip on' : 'chip'} onClick={() => pickTree(s)}>

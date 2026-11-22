@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api } from '../api.js';
 import { ErrorNote, Icon } from '../ui.jsx';
+import { go } from '../nav.js';
 
 function Hero() {
   return (
@@ -22,7 +23,7 @@ export function ResetPassword({ token, onSignedIn }) {
     e.preventDefault();
     try {
       const d = await api('/auth/reset', { method: 'POST', json: { token, new_password: password } });
-      window.location.hash = '/';
+      go('/');
       onSignedIn(d.token, d.user);
     } catch (err) { setError(err.message); }
   }

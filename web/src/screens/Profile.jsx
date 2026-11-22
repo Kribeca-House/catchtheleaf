@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api, displayName, seeded } from '../api.js';
 import { Avatar, Empty, ErrorNote, Icon, TopBar } from '../ui.jsx';
 import { LeafCard } from './LeafCard.jsx';
+import { ask } from '../dialog.jsx';
 
 const FRIEND_BUTTON = {
   none: { label: 'Add friend', cls: 'button' },
@@ -20,7 +21,7 @@ export function Profile({ username }) {
 
   async function friendAction() {
     const rel = data.relation;
-    if (rel === 'friends' && !confirmUnfriend()) return;
+    if (rel === 'friends' && !(await ask({ message: `Remove ${displayName(data.user)} from your friends?`, confirmLabel: 'Remove' }))) return;
     const method = rel === 'none' || rel === 'incoming' ? 'POST' : 'DELETE';
     try {
       const d = await api(`/friends/${encodeURIComponent(data.user.username)}`, { method });
@@ -28,7 +29,6 @@ export function Profile({ username }) {
       if (d.relation === 'friends' || rel === 'friends') load();
     } catch (e) { setError(e.message); }
   }
-  const confirmUnfriend = () => window.confirm(`Remove ${displayName(data.user)} from your friends?`);
 
   if (error && !data) return <><TopBar back title="" /><ErrorNote error={error} /></>;
   if (!data) return <div className="loading">Loading…</div>;

@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { api } from '../api.js';
 import { useSession } from '../App.jsx';
+import { ask } from '../dialog.jsx';
 import { resizeToJpeg } from '../cutout.js';
 import { Avatar, ErrorNote, TopBar } from '../ui.jsx';
 
@@ -42,9 +43,9 @@ export function Settings() {
   async function deleteAccount() {
     let current_password;
     if (user.has_password) {
-      current_password = window.prompt('This deletes your account and all your leaves for good. Type your password to confirm.');
+      current_password = await ask({ message: 'This deletes your account and all your leaves for good. Type your password to confirm.', confirmLabel: 'Delete account', danger: true, password: true });
       if (!current_password) return;
-    } else if (!window.confirm('This deletes your account and all your leaves for good. Delete it?')) return;
+    } else if (!(await ask({ message: 'This deletes your account and all your leaves for good. Delete it?', confirmLabel: 'Delete account', danger: true }))) return;
     try { await api('/me', { method: 'DELETE', json: { current_password } }); signOut(); } catch (err) { oops(err); }
   }
 
@@ -92,8 +93,8 @@ export function Settings() {
       </form>
 
       <section className="danger-zone">
-        <button className="button secondary" onClick={() => {
-          if (user.has_password || window.confirm("Your account has no password, so after logging out you can't log back in. Log out anyway?")) signOut();
+        <button className="button secondary" onClick={async () => {
+          if (user.has_password || await ask({ message: "Your account has no password, so after logging out you can't log back in. Log out anyway?", confirmLabel: 'Log out', danger: true })) signOut();
         }}>Log out</button>
         <button className="link danger" onClick={deleteAccount}>Delete my account</button>
       </section>

@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { api, displayName } from '../api.js';
-import { go, useSession } from '../App.jsx';
+import { useSession } from '../App.jsx';
+import { go, back } from '../nav.js';
+import { ask } from '../dialog.jsx';
 import { Avatar, Empty, ErrorNote, TopBar } from '../ui.jsx';
 
 export function GroupEditor({ id }) {
@@ -21,17 +23,17 @@ export function GroupEditor({ id }) {
       const json = { name: group.name, member_ids: [...picked] };
       if (id) await api(`/groups/${id}`, { method: 'PUT', json });
       else await api('/groups', { method: 'POST', json });
-      history.back();
+      back();
     } catch (err) { setError(err.message); }
   }
   async function remove() {
-    if (!window.confirm('Delete this group for everyone in it?')) return;
+    if (!(await ask({ message: 'Delete this group for everyone in it?', confirmLabel: 'Delete group', danger: true }))) return;
     await api(`/groups/${id}`, { method: 'DELETE' }).catch(() => {});
     go('/');
   }
   async function leave() {
     const note = group.is_owner && group.members.length > 1 ? ' Someone else in it becomes the owner.' : '';
-    if (!window.confirm(`Leave ${group.name}?${note}`)) return;
+    if (!(await ask({ message: `Leave ${group.name}?${note}`, confirmLabel: 'Leave' }))) return;
     await api(`/groups/${id}/leave`, { method: 'POST' }).catch(() => {});
     go('/');
   }

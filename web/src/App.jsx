@@ -8,22 +8,21 @@ import { CatchLeaf } from './screens/CatchLeaf.jsx';
 import { Settings } from './screens/Settings.jsx';
 import { GroupEditor } from './screens/GroupEditor.jsx';
 import { Avatar, Icon } from './ui.jsx';
+import { DialogHost } from './dialog.jsx';
+import { currentPath, subscribe, go } from './nav.js';
+
+export { go };
 
 const Session = createContext(null);
 export const useSession = () => useContext(Session);
 
-// Tiny hash router: #/, #/u/<name>, #/u/<name>/friends, #/catch, #/settings, #/groups/new, #/groups/<id>
+// Routes: /, /u/<name>, /u/<name>/friends, /catch, /settings, /groups/new, /groups/<id>, /reset/<token>
 function useRoute() {
-  const read = () => (window.location.hash.replace(/^#/, '') || '/').split('/').filter(Boolean);
-  const [parts, setParts] = useState(read);
-  useEffect(() => {
-    const on = () => { setParts(read()); window.scrollTo(0, 0); };
-    window.addEventListener('hashchange', on);
-    return () => window.removeEventListener('hashchange', on);
-  }, []);
+  const split = (p) => p.split('/').filter(Boolean);
+  const [parts, setParts] = useState(() => split(currentPath()));
+  useEffect(() => subscribe((p) => { setParts(split(p)); window.scrollTo(0, 0); }), []);
   return parts;
 }
-export const go = (path) => { window.location.hash = path; };
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -42,9 +41,9 @@ export default function App() {
   }, []);
 
   const [first, second, third] = route;
-  if (first === 'reset' && second) return <ResetPassword token={second} onSignedIn={signIn} />;
+  if (first === 'reset' && second) return <><ResetPassword token={second} onSignedIn={signIn} /><DialogHost /></>;
   if (loading) return <div className="splash"><Icon name="leaf" size={48} /></div>;
-  if (!user) return <Auth onSignedIn={signIn} />;
+  if (!user) return <><DemoBanner /><Auth onSignedIn={signIn} /></>;
 
   let screen;
   let tab = 'board';
@@ -57,7 +56,9 @@ export default function App() {
 
   return (
     <Session.Provider value={{ user, setUser, signIn, signOut }}>
+      <DemoBanner />
       <main className="screen">{screen}</main>
+      <DialogHost />
       <nav className="bottom-nav" aria-label="Main">
         <a href="#/" className={tab === 'board' ? 'active' : ''}>
           <Icon name="trophy" /><span>Leaderboard</span>
@@ -71,4 +72,10 @@ export default function App() {
       </nav>
     </Session.Provider>
   );
+}
+
+// Only in the preview build.
+function DemoBanner() {
+  if (!import.meta.env.VITE_DEMO) return null;
+  return <p className="demo-banner">Preview with sample players. Nothing is saved: it all resets when you reload.</p>;
 }

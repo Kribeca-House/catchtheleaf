@@ -1,4 +1,5 @@
 import { displayName } from './api.js';
+import { back as goBack } from './nav.js';
 
 const PATHS = {
   leaf: 'M20 3C10 3 4 8.5 4 15c0 1.6.4 3 1.1 4.2C6.5 15 9.5 11.6 14 9.5c-3.5 2.7-6.3 6-7.6 10.3 1.2.8 2.9 1.2 4.6 1.2C19 21 21 12 20 3z',
@@ -43,7 +44,7 @@ export function PlayerLink({ user, size = 40 }) {
 export function TopBar({ title, back, right }) {
   return (
     <header className="top-bar">
-      {back ? <button className="icon-button" onClick={() => history.back()} aria-label="Back"><Icon name="back" /></button> : <span className="spacer" />}
+      {back ? <button className="icon-button" onClick={goBack} aria-label="Back"><Icon name="back" /></button> : <span className="spacer" />}
       <h1>{title}</h1>
       {right || <span className="spacer" />}
     </header>

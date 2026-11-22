@@ -35,6 +35,11 @@ guesses. Without it you type the tree.
 
 Or everything in Docker: `docker compose up --build`, then open http://localhost:8080.
 
+## Clickable preview
+
+`cd web && npm run build:demo` makes `web/dist-demo/catch-the-leaf-preview.html`: the whole app in one
+page with sample players and no server (`web/src/demo/mockApi.js`). Nothing is saved.
+
 ## Tests
 
 ```sh

@@ -6,6 +6,10 @@ export const setToken = (t) => {
 };
 
 export async function api(path, { method = 'GET', json, form } = {}) {
+  if (import.meta.env.VITE_DEMO) {
+    const { mockApi } = await import('./demo/mockApi.js');
+    return mockApi(path, { method, json, form, token: getToken() });
+  }
   const headers = {};
   const token = getToken();
   if (token) headers.authorization = `Bearer ${token}`;

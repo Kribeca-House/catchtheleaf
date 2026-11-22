@@ -220,3 +220,12 @@ input:focus, textarea:focus { outline: 2px solid var(--ochre); outline-offset: 1
 .group-exit { justify-content: space-between; margin-top: 8px; }
 .group-exit .button { width: auto; margin-top: 0; }
 .group-editor > .button.secondary { margin-top: 16px; }
+
+.demo-banner { margin: 0; padding: 8px max(16px, env(safe-area-inset-left, 0px)); background: var(--teal); color: var(--paper); font-size: .8rem; text-align: center; }
+.dialog-backdrop { z-index: 30; }
+.dialog { background: var(--paper); border-radius: 20px; padding: 20px; width: min(360px, 100%); display: grid; gap: 14px; box-shadow: 0 20px 40px rgba(0, 0, 0, .25); }
+.dialog p { margin: 0; color: var(--ink); line-height: 1.4; }
+.dialog input { margin-top: 0; }
+.dialog-actions { justify-content: flex-end; }
+.button.danger-button { background: #c41a05; }
+.original-photo { display: block; margin-top: 12px; border-radius: 16px; max-height: 50vh; width: 100%; object-fit: contain; background: var(--stone); }

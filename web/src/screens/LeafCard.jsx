@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, displayName, formatDate, COMMON_TREES } from '../api.js';
 import { ErrorNote, Icon } from '../ui.jsx';
+import { ask } from '../dialog.jsx';
 
 // A leaf opens as a card. Tap to flip: the back is the leaf's mirrored silhouette in khaki green,
 // with the tree, the date and the caption.
@@ -9,6 +10,7 @@ export function LeafCard({ leaf, owner, canEdit, onClose, onChanged, onDeleted }
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({ tree_name: leaf.tree_name, caption: leaf.caption });
   const [error, setError] = useState('');
+  const [showPhoto, setShowPhoto] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => setFlipped(true), 650); // a little flip to show it can flip
@@ -25,7 +27,7 @@ export function LeafCard({ leaf, owner, canEdit, onClose, onChanged, onDeleted }
     } catch (err) { setError(err.message); }
   }
   async function remove() {
-    if (!window.confirm('Delete this leaf? It will stop counting on the leaderboards.')) return;
+    if (!(await ask({ message: 'Delete this leaf? It will stop counting on the leaderboards.', confirmLabel: 'Delete leaf', danger: true }))) return;
     try { await api(`/leaves/${leaf.id}`, { method: 'DELETE' }); onDeleted(leaf.id); } catch (err) { setError(err.message); }
   }
 
@@ -51,10 +53,12 @@ export function LeafCard({ leaf, owner, canEdit, onClose, onChanged, onDeleted }
 
         <div className="card-tools">
           <span className="hint">Tap the card to flip it</span>
-          <a href={leaf.photo} target="_blank" rel="noreferrer">Original photo</a>
+          <button className="link" onClick={() => setShowPhoto(!showPhoto)}>{showPhoto ? 'Hide photo' : 'Original photo'}</button>
           {canEdit && !editing && <button className="link" onClick={() => setEditing(true)}>Edit</button>}
           <button className="icon-button" onClick={onClose} aria-label="Close"><Icon name="close" /></button>
         </div>
+
+        {showPhoto && <img className="original-photo" src={leaf.photo} alt={`Original photo of the ${leaf.tree_name} leaf`} />}
 
         {editing && (
           <form className="sheet" onSubmit={save}>

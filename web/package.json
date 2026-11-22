@@ -5,7 +5,8 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:demo": "vite build --config vite.demo.config.js && node scripts/inline-demo.mjs"
   },
   "dependencies": {
     "react": "^19.3.1",
