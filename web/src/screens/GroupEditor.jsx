@@ -25,8 +25,14 @@ export function GroupEditor({ id }) {
     } catch (err) { setError(err.message); }
   }
   async function remove() {
-    if (!window.confirm(group.is_owner ? 'Delete this group for everyone in it?' : 'Leave this group?')) return;
+    if (!window.confirm('Delete this group for everyone in it?')) return;
     await api(`/groups/${id}`, { method: 'DELETE' }).catch(() => {});
+    go('/');
+  }
+  async function leave() {
+    const note = group.is_owner && group.members.length > 1 ? ' Someone else in it becomes the owner.' : '';
+    if (!window.confirm(`Leave ${group.name}?${note}`)) return;
+    await api(`/groups/${id}/leave`, { method: 'POST' }).catch(() => {});
     go('/');
   }
 
@@ -38,7 +44,7 @@ export function GroupEditor({ id }) {
       <div className="group-editor">
         <TopBar back title={group.name} />
         <ul className="people">{group.members.map((m) => <li key={m.id} className="person"><Avatar user={m} size={40} /><span className="who"><strong>{displayName(m)}</strong></span></li>)}</ul>
-        <button className="link danger" onClick={remove}>Leave group</button>
+        <button className="button secondary" onClick={leave}>Leave group</button>
       </div>
     );
   }
@@ -64,7 +70,12 @@ export function GroupEditor({ id }) {
       </ul>
       <ErrorNote error={error} />
       <button className="button">{id ? 'Save group' : 'Create group'}</button>
-      {id && <button type="button" className="link danger" onClick={remove}>Delete group</button>}
+      {id && (
+        <div className="row group-exit">
+          <button type="button" className="button secondary" onClick={leave}>Leave group</button>
+          <button type="button" className="link danger" onClick={remove}>Delete group</button>
+        </div>
+      )}
     </form>
   );
 }

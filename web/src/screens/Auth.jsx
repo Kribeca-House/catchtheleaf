@@ -2,87 +2,123 @@ import { useState } from 'react';
 import { api } from '../api.js';
 import { ErrorNote, Icon } from '../ui.jsx';
 
-export function RecoveryCode({ code, onDone }) {
-  const [copied, setCopied] = useState(false);
+function Hero() {
   return (
-    <div className="recovery">
-      <h2>Keep this recovery code</h2>
-      <p>We don't ask for your email, so this code is the only way back in if you forget your password. Screenshot it or save it in your password manager.</p>
-      <code className="recovery-code">{code}</code>
-      <button className="button secondary" onClick={() => navigator.clipboard?.writeText(code).then(() => setCopied(true))}>
-        {copied ? 'Copied' : 'Copy code'}
-      </button>
-      <button className="button" onClick={onDone}>I've saved it</button>
+    <div className="auth-hero">
+      <div className="falling-leaves" aria-hidden="true">
+        {[0, 1, 2, 3, 4].map((i) => <span key={i} style={{ '--i': i }}><Icon name="leaf" size={22 + i * 4} /></span>)}
+      </div>
+      <h1>Catch the leaf!</h1>
+      <p>First to catch a falling leaf wins.</p>
+    </div>
+  );
+}
+
+// Opened from the emailed link: #/reset/<token>
+export function ResetPassword({ token, onSignedIn }) {
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  async function submit(e) {
+    e.preventDefault();
+    try {
+      const d = await api('/auth/reset', { method: 'POST', json: { token, new_password: password } });
+      window.location.hash = '/';
+      onSignedIn(d.token, d.user);
+    } catch (err) { setError(err.message); }
+  }
+  return (
+    <div className="auth">
+      <Hero />
+      <form className="auth-form" onSubmit={submit}>
+        <h2>Choose a new password</h2>
+        <label>New password
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} minLength={8} required autoComplete="new-password" />
+        </label>
+        <ErrorNote error={error} />
+        <button className="button">Save and log in</button>
+      </form>
     </div>
   );
 }
 
 export function Auth({ onSignedIn }) {
-  const [mode, setMode] = useState('login'); // login | signup | recover
-  const [form, setForm] = useState({ username: '', password: '', alias: '', recovery_code: '' });
+  const [mode, setMode] = useState('signup'); // signup | login | forgot
+  const [form, setForm] = useState({ username: '', alias: '', email: '', password: '', login: '' });
   const [error, setError] = useState('');
+  const [sent, setSent] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [pending, setPending] = useState(null); // signed in, waiting for the recovery code to be saved
 
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+  const switchTo = (m) => { setMode(m); setError(''); setSent(false); };
 
   async function submit(e) {
     e.preventDefault();
     setBusy(true); setError('');
     try {
-      if (mode === 'login') {
-        const d = await api('/auth/login', { method: 'POST', json: { username: form.username, password: form.password } });
+      if (mode === 'signup') {
+        if (Boolean(form.email) !== Boolean(form.password)) throw new Error('Fill in both email and password, or leave both empty');
+        const d = await api('/auth/signup', { method: 'POST', json: { username: form.username, alias: form.alias, email: form.email, password: form.password } });
         onSignedIn(d.token, d.user);
-      } else if (mode === 'signup') {
-        const d = await api('/auth/signup', { method: 'POST', json: { username: form.username, password: form.password, alias: form.alias } });
-        setPending(d);
+      } else if (mode === 'login') {
+        const d = await api('/auth/login', { method: 'POST', json: { login: form.login, password: form.password } });
+        onSignedIn(d.token, d.user);
       } else {
-        const d = await api('/auth/recover', { method: 'POST', json: { username: form.username, recovery_code: form.recovery_code, new_password: form.password } });
-        setPending(d);
+        await api('/auth/forgot', { method: 'POST', json: { email: form.email } });
+        setSent(true);
       }
     } catch (err) { setError(err.message); } finally { setBusy(false); }
   }
 
-  if (pending) {
-    return <div className="auth"><RecoveryCode code={pending.recovery_code} onDone={() => onSignedIn(pending.token, pending.user)} /></div>;
-  }
-
   return (
     <div className="auth">
-      <div className="auth-hero">
-        <div className="falling-leaves" aria-hidden="true">
-          {[0, 1, 2, 3, 4].map((i) => <span key={i} style={{ '--i': i }}><Icon name="leaf" size={22 + i * 4} /></span>)}
-        </div>
-        <h1>Catch the leaf!</h1>
-        <p>First to catch a falling leaf wins.</p>
-      </div>
+      <Hero />
       <form className="auth-form" onSubmit={submit}>
-        <label>Username
-          <input value={form.username} onChange={set('username')} autoComplete="username" autoCapitalize="none" required minLength={3} maxLength={24} />
-        </label>
         {mode === 'signup' && (
-          <label>Alias <span className="hint">(optional, shown instead of your username)</span>
-            <input value={form.alias} onChange={set('alias')} maxLength={40} />
-          </label>
+          <>
+            <label>Username
+              <input value={form.username} onChange={set('username')} autoComplete="username" autoCapitalize="none" required minLength={3} maxLength={24} />
+            </label>
+            <label>Alias <span className="hint">(optional, shown instead of your username)</span>
+              <input value={form.alias} onChange={set('alias')} maxLength={40} />
+            </label>
+            <details className="optional-creds">
+              <summary>Email and password <span className="hint">(optional)</span></summary>
+              <p className="muted small">Add both to log in on other devices and to reset your password. Without them, your account lives on this phone only. You can add them later in Settings.</p>
+              <label>Email
+                <input type="email" value={form.email} onChange={set('email')} autoComplete="email" />
+              </label>
+              <label>Password <span className="hint">(8+ characters)</span>
+                <input type="password" value={form.password} onChange={set('password')} minLength={8} autoComplete="new-password" />
+              </label>
+            </details>
+          </>
         )}
-        {mode === 'recover' && (
-          <label>Recovery code
-            <input value={form.recovery_code} onChange={set('recovery_code')} placeholder="LEAF-XXXX-XXXX-XXXX" autoCapitalize="characters" required />
-          </label>
+        {mode === 'login' && (
+          <>
+            <label>Username or email
+              <input value={form.login} onChange={set('login')} autoComplete="username" autoCapitalize="none" required />
+            </label>
+            <label>Password
+              <input type="password" value={form.password} onChange={set('password')} required autoComplete="current-password" />
+            </label>
+          </>
         )}
-        <label>{mode === 'recover' ? 'New password' : 'Password'}
-          <input type="password" value={form.password} onChange={set('password')} minLength={mode === 'login' ? 1 : 8} required
-            autoComplete={mode === 'login' ? 'current-password' : 'new-password'} />
-        </label>
+        {mode === 'forgot' && (
+          sent ? <p className="notice">If an account uses that email, a reset link is on its way. It works for one hour.</p> : (
+            <label>Your account's email
+              <input type="email" value={form.email} onChange={set('email')} required autoComplete="email" />
+            </label>
+          )
+        )}
         <ErrorNote error={error} />
-        <button className="button" disabled={busy}>
-          {{ login: 'Log in', signup: 'Create account', recover: 'Set new password' }[mode]}
-        </button>
+        {!(mode === 'forgot' && sent) && (
+          <button className="button" disabled={busy}>{{ signup: 'Start catching', login: 'Log in', forgot: 'Email me a reset link' }[mode]}</button>
+        )}
       </form>
       <div className="auth-switch">
-        {mode !== 'login' && <button className="link" onClick={() => { setMode('login'); setError(''); }}>I have an account</button>}
-        {mode !== 'signup' && <button className="link" onClick={() => { setMode('signup'); setError(''); }}>Create an account</button>}
-        {mode === 'login' && <button className="link" onClick={() => { setMode('recover'); setError(''); }}>Forgot password?</button>}
+        {mode !== 'login' && <button className="link" onClick={() => switchTo('login')}>I have an account</button>}
+        {mode !== 'signup' && <button className="link" onClick={() => switchTo('signup')}>Create an account</button>}
+        {mode === 'login' && <button className="link" onClick={() => switchTo('forgot')}>Forgot password?</button>}
       </div>
     </div>
   );

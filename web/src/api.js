@@ -31,17 +31,6 @@ export function formatDate(d, withTime = false) {
   return date.toLocaleString(undefined, opts);
 }
 
-// Readable text on top of a leaf's own colour.
-export function textOn(hex) {
-  const n = parseInt(hex.slice(1), 16);
-  const [r, g, b] = [n >> 16, (n >> 8) & 255, n & 255].map((v) => {
-    const c = v / 255;
-    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-  });
-  const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-  return lum > 0.3 ? '#2d2b1a' : '#fbf7f5';
-}
-
 // Small deterministic random from an id, so the leaf pile looks the same every visit.
 export function seeded(id, n) {
   let h = 2166136261;

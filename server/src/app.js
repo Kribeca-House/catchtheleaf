@@ -5,6 +5,7 @@ import * as auth from './auth.js';
 import * as storage from './storage.js';
 import { rankFirstCatch, rankWealth, allTimeScores, withPlaces } from './scoring.js';
 import { identifyLeaf } from './identify.js';
+import { sendMail } from './mail.js';
 
 const USERNAME_RE = /^[a-z0-9_.]{3,24}$/i;
 const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
@@ -34,16 +35,22 @@ async function saveImage(file, folder) {
   return key;
 }
 
-const publicUser = (u) => ({
-  id: u.id, username: u.username, alias: u.alias || null,
-  avatar: storage.url(u.avatar_key), is_private: u.is_private,
+// A private profile hides its picture from everyone except the person and their friends.
+// `circle` is the viewer plus their friends (see viewerCircle).
+const publicUser = (u, circle) => ({
+  id: u.id, username: u.username, alias: u.alias || null, is_private: u.is_private,
+  avatar: u.is_private && !circle?.has(u.id) ? null : storage.url(u.avatar_key),
+});
+// What you see about yourself: also whether you have email + password set.
+const selfUser = (u) => ({
+  ...publicUser(u, new Set([u.id])), email: u.email || null, has_password: Boolean(u.password_hash),
 });
 
 const publicLeaf = (l) => ({
   id: l.id, user_id: l.user_id, season_id: l.season_id, caught_at: l.caught_at,
   photo: storage.url(l.photo_key), cutout: storage.url(l.cutout_key), colour: l.colour,
   tree_name: l.tree_name, tree_scientific: l.tree_scientific, tree_confidence: l.tree_confidence,
-  tree_source: l.tree_source, caption: l.caption,
+  tree_source: l.tree_source, caption: l.caption, caught_at_source: l.caught_at_source,
 });
 
 async function friendIds(userId) {
@@ -72,8 +79,9 @@ async function userByName(username) {
   return rows[0] || fail(404, 'No such player');
 }
 
-// Private profiles still appear on leaderboards, but only friends see their leaves and friends list.
-const canSeeDetails = (rel, user) => !user.is_private || rel === 'self' || rel === 'friends';
+async function viewerCircle(userId) {
+  return new Set([userId, ...(await friendIds(userId))]);
+}
 
 async function seasonStats(seasonId, userIds) {
   const { rows } = await q(
@@ -108,57 +116,81 @@ export function createApp() {
   app.get('/api/health', (c) => c.json({ ok: true }));
 
   // ----- accounts -----
+  // Username is required. Email and password are optional, but set together: an account without them
+  // lives only on the device that created it (its session never lapses while used).
+
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  async function checkCredentials(email, password, exceptId = null) {
+    const e = String(email || '').trim();
+    const p = String(password || '');
+    if (!e && !p) return null;
+    if (!e || !p) fail(400, 'Set both an email and a password, or neither');
+    if (!EMAIL_RE.test(e) || e.length > 200) fail(400, "That email doesn't look right");
+    if (p.length < 8) fail(400, 'Password needs at least 8 characters');
+    const taken = await q('select 1 from users where lower(email) = lower($1) and id is distinct from $2', [e, exceptId]);
+    if (taken.rows.length) fail(409, 'That email is already used by another account');
+    return { email: e, password_hash: await auth.hashSecret(p) };
+  }
 
   app.post('/api/auth/signup', async (c) => {
-    const { username, password, alias } = await c.req.json();
+    const { username, alias, email, password } = await c.req.json();
     if (!USERNAME_RE.test(username || '')) fail(400, 'Username: 3 to 24 letters, numbers, dots or underscores');
-    if (!password || password.length < 8) fail(400, 'Password needs at least 8 characters');
     const taken = await q('select 1 from users where lower(username) = lower($1)', [username]);
     if (taken.rows.length) fail(409, 'That username is taken');
-    const recovery = auth.newRecoveryCode();
+    const creds = await checkCredentials(email, password);
     const id = randomUUID();
-    await q(
-      'insert into users (id, username, alias, password_hash, recovery_hash) values ($1, $2, $3, $4, $5)',
-      [id, username, (alias || '').trim().slice(0, 40) || null, await auth.hashSecret(password),
-        await auth.hashSecret(auth.normaliseRecovery(recovery))],
-    );
+    await q('insert into users (id, username, alias, email, password_hash) values ($1, $2, $3, $4, $5)',
+      [id, username, (alias || '').trim().slice(0, 40) || null, creds?.email ?? null, creds?.password_hash ?? null]);
     const token = await auth.createSession(id);
     const { rows } = await q('select * from users where id = $1', [id]);
-    return c.json({ token, user: publicUser(rows[0]), recovery_code: recovery }, 201);
+    return c.json({ token, user: selfUser(rows[0]) }, 201);
   });
 
+  // Log in with username or email, plus password.
   app.post('/api/auth/login', async (c) => {
-    const { username, password } = await c.req.json();
-    const key = `login:${String(username).toLowerCase()}`;
+    const { login, password } = await c.req.json();
+    const key = `login:${String(login).toLowerCase()}`;
     if (auth.tooManyFailures(key)) fail(429, 'Too many tries. Wait 15 minutes.');
-    const { rows } = await q('select * from users where lower(username) = lower($1)', [username || '']);
+    const { rows } = await q('select * from users where lower(username) = lower($1) or lower(email) = lower($1)', [String(login || '').trim()]);
     const u = rows[0];
+    if (u && !u.password_hash) fail(401, "This account has no password, so it only works on the phone that created it");
     if (!u || !(await auth.verifySecret(password || '', u.password_hash))) {
       auth.noteFailure(key);
-      fail(401, 'Wrong username or password');
+      fail(401, 'Wrong username, email or password');
     }
     auth.clearFailures(key);
-    return c.json({ token: await auth.createSession(u.id), user: publicUser(u) });
+    return c.json({ token: await auth.createSession(u.id), user: selfUser(u) });
   });
 
-  // Forgotten password: username + recovery code sets a new password and issues a new code.
-  app.post('/api/auth/recover', async (c) => {
-    const { username, recovery_code, new_password } = await c.req.json();
-    const key = `recover:${String(username).toLowerCase()}`;
+  // Forgotten password: email a one-hour reset link. Same answer whether or not the account exists.
+  app.post('/api/auth/forgot', async (c) => {
+    const { email } = await c.req.json();
+    const key = `forgot:${String(email).toLowerCase()}`;
     if (auth.tooManyFailures(key)) fail(429, 'Too many tries. Wait 15 minutes.');
-    if (!new_password || new_password.length < 8) fail(400, 'Password needs at least 8 characters');
-    const { rows } = await q('select * from users where lower(username) = lower($1)', [username || '']);
-    const u = rows[0];
-    if (!u || !(await auth.verifySecret(auth.normaliseRecovery(recovery_code), u.recovery_hash))) {
-      auth.noteFailure(key);
-      fail(401, 'That recovery code does not match');
+    auth.noteFailure(key);
+    const { rows } = await q('select * from users where lower(email) = lower($1)', [String(email || '').trim()]);
+    if (rows[0]) {
+      const token = await auth.createResetToken(rows[0].id);
+      const base = process.env.APP_URL || new URL(c.req.url).origin;
+      await sendMail({
+        to: rows[0].email,
+        subject: 'Reset your Catch the leaf! password',
+        text: `Hi ${rows[0].alias || rows[0].username},\n\nTap this link within an hour to choose a new password:\n${base}/#/reset/${token}\n\nIf you didn't ask for this, ignore this email.`,
+      });
     }
-    auth.clearFailures(key);
-    const recovery = auth.newRecoveryCode();
-    await q('update users set password_hash = $2, recovery_hash = $3 where id = $1',
-      [u.id, await auth.hashSecret(new_password), await auth.hashSecret(auth.normaliseRecovery(recovery))]);
-    await auth.dropAllSessions(u.id);
-    return c.json({ token: await auth.createSession(u.id), user: publicUser(u), recovery_code: recovery });
+    return c.json({ ok: true });
+  });
+
+  app.post('/api/auth/reset', async (c) => {
+    const { token, new_password } = await c.req.json();
+    if (!new_password || new_password.length < 8) fail(400, 'Password needs at least 8 characters');
+    const userId = await auth.useResetToken(token);
+    if (!userId) fail(400, 'This reset link has expired or was already used. Ask for a new one.');
+    await q('update users set password_hash = $2 where id = $1', [userId, await auth.hashSecret(new_password)]);
+    const session = await auth.createSession(userId);
+    await auth.dropOtherSessions(userId, session);
+    const { rows } = await q('select * from users where id = $1', [userId]);
+    return c.json({ token: session, user: selfUser(rows[0]) });
   });
 
   app.post('/api/auth/logout', async (c) => {
@@ -166,7 +198,7 @@ export function createApp() {
     return c.json({ ok: true });
   });
 
-  app.get('/api/me', (c) => c.json({ user: publicUser(me(c)) }));
+  app.get('/api/me', (c) => c.json({ user: selfUser(me(c)) }));
 
   app.patch('/api/me', async (c) => {
     const u = me(c);
@@ -174,7 +206,7 @@ export function createApp() {
     const alias = body.alias === undefined ? u.alias : (String(body.alias).trim().slice(0, 40) || null);
     const isPrivate = body.is_private === undefined ? u.is_private : Boolean(body.is_private);
     const { rows } = await q('update users set alias = $2, is_private = $3 where id = $1 returning *', [u.id, alias, isPrivate]);
-    return c.json({ user: publicUser(rows[0]) });
+    return c.json({ user: selfUser(rows[0]) });
   });
 
   app.post('/api/me/avatar', async (c) => {
@@ -186,29 +218,37 @@ export function createApp() {
     return c.json({ avatar: storage.url(key) });
   });
 
-  app.post('/api/me/password', async (c) => {
-    const u = me(c);
-    const { current_password, new_password } = await c.req.json();
-    if (!(await auth.verifySecret(current_password || '', u.password_hash))) fail(401, 'Current password is wrong');
-    if (!new_password || new_password.length < 8) fail(400, 'Password needs at least 8 characters');
-    await q('update users set password_hash = $2 where id = $1', [u.id, await auth.hashSecret(new_password)]);
-    return c.json({ ok: true });
-  });
+  async function checkCurrentPassword(u, current) {
+    if (u.password_hash && !(await auth.verifySecret(current || '', u.password_hash))) fail(401, 'Current password is wrong');
+  }
 
-  app.post('/api/me/recovery-code', async (c) => {
+  // Add email + password to a device-only account, or change them. Needs the current password if there is one.
+  app.put('/api/me/credentials', async (c) => {
     const u = me(c);
-    const { current_password } = await c.req.json();
-    if (!(await auth.verifySecret(current_password || '', u.password_hash))) fail(401, 'Current password is wrong');
-    const recovery = auth.newRecoveryCode();
-    await q('update users set recovery_hash = $2 where id = $1', [u.id, await auth.hashSecret(auth.normaliseRecovery(recovery))]);
-    return c.json({ recovery_code: recovery });
+    const { current_password, email, new_password } = await c.req.json();
+    await checkCurrentPassword(u, current_password);
+    let creds;
+    if (u.password_hash && !new_password) {
+      // only changing the email
+      creds = await checkCredentials(email, 'unchanged-password', u.id);
+      creds.password_hash = u.password_hash;
+    } else {
+      creds = await checkCredentials(email ?? u.email, new_password, u.id);
+      if (!creds) fail(400, 'Set both an email and a password');
+    }
+    const { rows } = await q('update users set email = $2, password_hash = $3 where id = $1 returning *', [u.id, creds.email, creds.password_hash]);
+    if (new_password) await auth.dropOtherSessions(u.id, c.get('token'));
+    return c.json({ user: selfUser(rows[0]) });
   });
 
   app.delete('/api/me', async (c) => {
     const u = me(c);
-    const { current_password } = await c.req.json();
-    if (!(await auth.verifySecret(current_password || '', u.password_hash))) fail(401, 'Current password is wrong');
+    const { current_password } = await c.req.json().catch(() => ({}));
+    await checkCurrentPassword(u, current_password);
     const { rows } = await q('select photo_key, cutout_key from leaves where user_id = $1', [u.id]);
+    // Groups they own pass to another member (or go, if empty) before the account is deleted.
+    const owned = await q('select id from groups where owner_id = $1', [u.id]);
+    for (const g of owned.rows) await leaveGroup(g.id, u.id);
     await q('delete from users where id = $1', [u.id]);
     await Promise.all([u.avatar_key, ...rows.flatMap((r) => [r.photo_key, r.cutout_key])].map(storage.removeObject));
     return c.json({ ok: true });
@@ -217,29 +257,30 @@ export function createApp() {
   // ----- players & friends -----
 
   app.get('/api/users', async (c) => {
-    me(c);
+    const viewer = me(c);
     const term = (c.req.query('q') || '').trim();
     if (term.length < 2) return c.json({ users: [] });
     const like = `%${term.replace(/[%_\\]/g, (m) => '\\' + m)}%`;
     const { rows } = await q(
       `select * from users where username ilike $1 or alias ilike $1 order by lower(username) limit 25`, [like]);
-    return c.json({ users: rows.map(publicUser) });
+    const circle = await viewerCircle(viewer.id);
+    return c.json({ users: rows.map((x) => publicUser(x, circle)) });
   });
 
   app.get('/api/users/:username', async (c) => {
     const viewer = me(c);
     const u = await userByName(c.req.param('username'));
     const rel = await relation(viewer.id, u.id);
-    const visible = canSeeDetails(rel, u);
     const season = await currentOrLastSeason();
     const [{ rows: [counts] }, friends, leaves] = await Promise.all([
       q(`select count(*)::int as total, count(*) filter (where season_id = $2)::int as this_season
            from leaves where user_id = $1`, [u.id, season?.id ?? null]),
       friendIds(u.id),
-      visible ? q('select * from leaves where user_id = $1 order by caught_at desc', [u.id]) : { rows: [] },
+      q('select * from leaves where user_id = $1 order by caught_at desc', [u.id]),
     ]);
+    const circle = new Set([viewer.id, ...(rel === 'friends' ? [u.id] : [])]);
     return c.json({
-      user: publicUser(u), relation: rel, visible,
+      user: publicUser(u, circle), relation: rel,
       stats: { leaves_total: counts.total, leaves_this_season: counts.this_season, friends: friends.length },
       leaves: leaves.rows.map(publicLeaf),
     });
@@ -248,11 +289,10 @@ export function createApp() {
   app.get('/api/users/:username/friends', async (c) => {
     const viewer = me(c);
     const u = await userByName(c.req.param('username'));
-    const rel = await relation(viewer.id, u.id);
-    if (!canSeeDetails(rel, u)) return c.json({ friends: [], visible: false });
     const ids = await friendIds(u.id);
     const { rows } = await q('select * from users where id = any($1) order by lower(username)', [ids]);
-    return c.json({ friends: rows.map(publicUser), visible: true });
+    const circle = await viewerCircle(viewer.id);
+    return c.json({ friends: rows.map((x) => publicUser(x, circle)) });
   });
 
   app.get('/api/friends/requests', async (c) => {
@@ -263,8 +303,8 @@ export function createApp() {
         where f.status = 'pending' and (f.requester_id = $1 or f.addressee_id = $1) order by f.created_at desc`,
       [u.id]);
     return c.json({
-      incoming: rows.filter((r) => !r.outgoing).map(publicUser),
-      outgoing: rows.filter((r) => r.outgoing).map(publicUser),
+      incoming: rows.filter((r) => !r.outgoing).map((x) => publicUser(x)),
+      outgoing: rows.filter((r) => r.outgoing).map((x) => publicUser(x)),
     });
   });
 
@@ -319,13 +359,16 @@ export function createApp() {
   app.get('/api/groups/:id', async (c) => {
     const u = me(c);
     const g = await groupForMember(c.req.param('id'), u.id);
-    return c.json({ id: g.id, name: g.name, is_owner: g.owner_id === u.id, members: (await groupMembers(g.id)).map(publicUser) });
+    const circle = await viewerCircle(u.id);
+    return c.json({ id: g.id, name: g.name, is_owner: g.owner_id === u.id, members: (await groupMembers(g.id)).map((x) => publicUser(x, circle)) });
   });
 
-  // Owner picks members from their friends. GUESS: only the owner edits, members can leave.
-  async function validMemberIds(ownerId, ids) {
-    const friends = new Set(await friendIds(ownerId));
-    return [...new Set([ownerId, ...(ids || []).filter((id) => friends.has(id))])];
+  // The owner picks members from their friends (and can keep anyone already in the group).
+  // Anyone can leave; when the owner leaves, the group passes to another member.
+  async function validMemberIds(ownerId, ids, groupId = null) {
+    const allowed = new Set(await friendIds(ownerId));
+    if (groupId) (await groupMembers(groupId)).forEach((m) => allowed.add(m.id));
+    return [...new Set([ownerId, ...(ids || []).filter((id) => allowed.has(id))])];
   }
 
   app.post('/api/groups', async (c) => {
@@ -347,20 +390,38 @@ export function createApp() {
     if (g.owner_id !== u.id) fail(403, 'Only the group owner can edit it');
     const { name, member_ids } = await c.req.json();
     const clean = String(name || g.name).trim().slice(0, 40);
+    const ids = await validMemberIds(u.id, member_ids, g.id);
     await q('update groups set name = $2 where id = $1', [g.id, clean]);
     await q('delete from group_members where group_id = $1', [g.id]);
-    for (const uid of await validMemberIds(u.id, member_ids)) {
+    for (const uid of ids) {
       await q('insert into group_members (group_id, user_id) values ($1, $2)', [g.id, uid]);
     }
     return c.json({ ok: true });
   });
 
-  // Owner deletes the group; anyone else leaves it.
+  // Only the owner can delete a group for everyone.
   app.delete('/api/groups/:id', async (c) => {
     const u = me(c);
     const g = await groupForMember(c.req.param('id'), u.id);
-    if (g.owner_id === u.id) await q('delete from groups where id = $1', [g.id]);
-    else await q('delete from group_members where group_id = $1 and user_id = $2', [g.id, u.id]);
+    if (g.owner_id !== u.id) fail(403, 'Only the group owner can delete it. You can leave it instead.');
+    await q('delete from groups where id = $1', [g.id]);
+    return c.json({ ok: true });
+  });
+
+  async function leaveGroup(groupId, userId) {
+    await q('delete from group_members where group_id = $1 and user_id = $2', [groupId, userId]);
+    const { rows: [g] } = await q('select * from groups where id = $1', [groupId]);
+    if (!g || g.owner_id !== userId) return;
+    const next = (await groupMembers(groupId))[0];
+    if (next) await q('update groups set owner_id = $2 where id = $1', [groupId, next.id]);
+    else await q('delete from groups where id = $1', [groupId]);
+  }
+
+  // Anyone can leave. If the owner leaves, another member becomes owner; an empty group is deleted.
+  app.post('/api/groups/:id/leave', async (c) => {
+    const u = me(c);
+    const g = await groupForMember(c.req.param('id'), u.id);
+    await leaveGroup(g.id, u.id);
     return c.json({ ok: true });
   });
 
@@ -404,7 +465,8 @@ export function createApp() {
     const entries = withPlaces(ranked, keep);
     const ids = entries.map((e) => e.user_id);
     const { rows: users } = await q('select * from users where id = any($1)', [ids]);
-    const byId = new Map(users.map((x) => [x.id, publicUser(x)]));
+    const circle = await viewerCircle(u.id);
+    const byId = new Map(users.map((x) => [x.id, publicUser(x, circle)]));
     return c.json({
       season,
       entries: entries.map((e) => ({ ...e, user: byId.get(e.user_id), is_me: e.user_id === u.id })),
@@ -427,21 +489,27 @@ export function createApp() {
     const treeName = String(body.tree_name || '').trim().slice(0, 60);
     if (!treeName) fail(400, 'Which tree is it from? Type "Unknown" if you are not sure.');
     const colour = /^#[0-9a-f]{6}$/i.test(body.colour || '') ? body.colour : '#617257';
-    // The catch time is the server's clock at upload, so nobody can backdate a catch (see ARCHITECTURE.md).
+    // The catch time is when the photo was taken, read on the phone from the photo's EXIF data
+    // (Rebeca: trust players). Without it, the upload time. A time in the future is not accepted.
     const now = new Date();
-    await ensureCurrentSeason(now);
-    const season = await seasonAt(now);
+    const photoTime = body.caught_at ? new Date(String(body.caught_at)) : null;
+    const validPhotoTime = photoTime && !Number.isNaN(photoTime.getTime()) &&
+      photoTime <= new Date(now.getTime() + 10 * 60_000) && photoTime.getUTCFullYear() >= 2000;
+    const caughtAt = validPhotoTime ? photoTime : now;
+    await ensureCurrentSeason(caughtAt);
+    const season = await seasonAt(caughtAt);
     const photoKey = await saveImage(body.photo, `leaves/${u.id}`);
     const cutoutKey = await saveImage(body.cutout, `leaves/${u.id}`);
     const id = randomUUID();
     const conf = Number(body.tree_confidence);
     const { rows } = await q(
       `insert into leaves (id, user_id, season_id, caught_at, photo_key, cutout_key, colour, tree_name, tree_scientific,
-                           tree_confidence, tree_source, caption)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning *`,
-      [id, u.id, season?.id ?? null, now, photoKey, cutoutKey, colour, treeName,
+                           tree_confidence, tree_source, caption, caught_at_source)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) returning *`,
+      [id, u.id, season?.id ?? null, caughtAt, photoKey, cutoutKey, colour, treeName,
         String(body.tree_scientific || '').slice(0, 80) || null, Number.isFinite(conf) ? conf : null,
-        body.tree_source === 'auto' ? 'auto' : 'user', String(body.caption || '').slice(0, 280)],
+        body.tree_source === 'auto' ? 'auto' : 'user', String(body.caption || '').slice(0, 280),
+        validPhotoTime ? 'photo' : 'upload'],
     );
     return c.json({ leaf: publicLeaf(rows[0]), counted: Boolean(season) }, 201);
   });

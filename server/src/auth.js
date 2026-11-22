@@ -3,7 +3,9 @@ import { promisify } from 'node:util';
 import { q } from './db.js';
 
 const scryptAsync = promisify(scrypt);
-const SESSION_DAYS = 90;
+// Long, sliding sessions: an account without email + password only exists on the device holding
+// its session, so that session must not quietly expire while the person still plays.
+const SESSION_DAYS = 400;
 const PARAMS = { N: 16384, r: 8, p: 1 };
 
 export async function hashSecret(secret) {
@@ -22,14 +24,18 @@ export async function verifySecret(secret, stored) {
 
 const sha = (s) => createHash('sha256').update(s).digest('hex');
 
-// The recovery code replaces "forgot password" emails. It is shown once at sign-up,
-// looks like LEAF-7K3Q-9XWD-2HPA, and is stored only as a hash.
-export function newRecoveryCode() {
-  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  const chars = [...randomBytes(12)].map((b) => alphabet[b % alphabet.length]).join('');
-  return `LEAF-${chars.slice(0, 4)}-${chars.slice(4, 8)}-${chars.slice(8, 12)}`;
+// Password reset by email: a one-hour, single-use link.
+export async function createResetToken(userId) {
+  const token = randomBytes(32).toString('base64url');
+  await q(`insert into password_resets (token_hash, user_id, expires_at) values ($1, $2, now() + interval '1 hour')`, [sha(token), userId]);
+  return token;
 }
-export const normaliseRecovery = (code) => String(code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+export async function useResetToken(token) {
+  const { rows } = await q(
+    `update password_resets set used = true where token_hash = $1 and not used and expires_at > now() returning user_id`,
+    [sha(String(token || ''))]);
+  return rows[0]?.user_id || null;
+}
 
 export async function createSession(userId) {
   const token = randomBytes(32).toString('base64url');
@@ -41,15 +47,21 @@ export async function createSession(userId) {
 }
 
 export const dropSession = (token) => q('delete from sessions where token_hash = $1', [sha(token)]);
-export const dropAllSessions = (userId) => q('delete from sessions where user_id = $1', [userId]);
+export const dropOtherSessions = (userId, keepToken) =>
+  q('delete from sessions where user_id = $1 and token_hash <> $2', [userId, sha(String(keepToken || ''))]);
 
 export async function userFromToken(token) {
   if (!token) return null;
   const { rows } = await q(
-    'select u.* from sessions s join users u on u.id = s.user_id where s.token_hash = $1 and s.expires_at > now()',
+    `select u.*, s.expires_at < now() + interval '300 days' as needs_refresh
+       from sessions s join users u on u.id = s.user_id where s.token_hash = $1 and s.expires_at > now()`,
     [sha(token)],
   );
-  return rows[0] || null;
+  const u = rows[0];
+  if (u?.needs_refresh) {
+    await q('update sessions set expires_at = now() + make_interval(days => $2) where token_hash = $1', [sha(token), SESSION_DAYS]);
+  }
+  return u || null;
 }
 
 // Per-instance throttle on failed logins and recoveries. Serverless instances don't share memory,

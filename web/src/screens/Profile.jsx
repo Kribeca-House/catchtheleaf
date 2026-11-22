@@ -33,7 +33,7 @@ export function Profile({ username }) {
   if (error && !data) return <><TopBar back title="" /><ErrorNote error={error} /></>;
   if (!data) return <div className="loading">Loading…</div>;
 
-  const { user, stats, relation, visible, leaves } = data;
+  const { user, stats, relation, leaves } = data;
   const self = relation === 'self';
 
   return (
@@ -45,7 +45,7 @@ export function Profile({ username }) {
         <Avatar user={user} size={96} />
         <h2>{displayName(user)}</h2>
         {user.alias && <p className="handle">@{user.username}</p>}
-        {user.is_private && <p className="private-badge"><Icon name="lock" size={14} /> Private profile</p>}
+        {self && user.is_private && <p className="private-badge"><Icon name="lock" size={14} /> Private: only friends see your picture</p>}
         <dl className="stats">
           <div><dt>This season</dt><dd>{stats.leaves_this_season}</dd></div>
           <div><dt>All time</dt><dd>{stats.leaves_total}</dd></div>
@@ -58,11 +58,10 @@ export function Profile({ username }) {
         <ErrorNote error={error} />
       </section>
 
-      {!visible && <Empty>{displayName(user)} keeps their leaves for friends only.</Empty>}
-      {visible && !leaves.length && (
+      {!leaves.length && (
         <Empty>{self ? <>No leaves yet. Tap the <strong>leaf button</strong> below after your first catch.</> : 'No leaves caught yet.'}</Empty>
       )}
-      {visible && leaves.length > 0 && (
+      {leaves.length > 0 && (
         <ul className="leaf-pile" aria-label="Caught leaves">
           {leaves.map((l, i) => {
             const rot = Math.round((seeded(l.id, 1) - 0.5) * 70);

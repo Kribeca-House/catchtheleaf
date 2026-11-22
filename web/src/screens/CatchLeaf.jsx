@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, COMMON_TREES } from '../api.js';
+import { api, COMMON_TREES, formatDate } from '../api.js';
 import { go, useSession } from '../App.jsx';
 import { cutOutLeaf, photoAsCutout } from '../cutout.js';
+import { photoTakenAt } from '../exif.js';
 import { ErrorNote, Icon, TopBar } from '../ui.jsx';
 
 // Catch flow: photo -> cut-out + tree suggestions -> check the tree, add a caption -> save.
@@ -14,6 +15,7 @@ export function CatchLeaf() {
   const [ident, setIdent] = useState({ loading: false, available: true, suggestions: [] });
   const [tree, setTree] = useState({ name: '', scientific: '', confidence: null, source: 'user' });
   const [caption, setCaption] = useState('');
+  const [takenAt, setTakenAt] = useState(null); // { date, source: 'photo' | 'file' } or null = upload time
   const [error, setError] = useState('');
   const camera = useRef(null);
   const library = useRef(null);
@@ -26,6 +28,10 @@ export function CatchLeaf() {
     if (!f) return;
     setFile(f); setStep('working'); setError('');
     try {
+      // When was it caught? The photo's own timestamp, else the file's date if it's clearly older than now.
+      const exif = await photoTakenAt(f);
+      const fileDate = f.lastModified && Date.now() - f.lastModified > 2 * 60_000 ? new Date(f.lastModified) : null;
+      setTakenAt(exif ? { date: exif, source: 'photo' } : fileDate ? { date: fileDate, source: 'file' } : null);
       const r = await cutOutLeaf(f);
       setResult(r);
       if (r.ok) setPreview(URL.createObjectURL(r.cutout));
@@ -69,6 +75,7 @@ export function CatchLeaf() {
     if (tree.confidence != null) form.append('tree_confidence', String(tree.confidence));
     form.append('tree_source', tree.source);
     form.append('caption', caption);
+    if (takenAt) form.append('caught_at', takenAt.date.toISOString());
     try {
       const d = await api('/leaves', { method: 'POST', form });
       if (!d.counted) window.alert("Saved! It's outside the season, so it won't count on this season's boards.");
@@ -134,7 +141,10 @@ export function CatchLeaf() {
           <label>Caption
             <textarea value={caption} onChange={(e) => setCaption(e.target.value)} maxLength={280} rows={3} placeholder="Snatched it right off the bus stop roof" />
           </label>
-          <p className="muted small">The catch time is when you save, so upload right after you catch it.</p>
+          <p className="muted small caught-at">
+            Caught {formatDate(takenAt ? takenAt.date : new Date(), true)}
+            {' · '}{takenAt?.source === 'photo' ? 'from the photo' : takenAt ? "from the photo file's date" : 'no time in the photo, so we use now'}
+          </p>
           <ErrorNote error={error} />
           <button className="button big" disabled={!result.ok || step === 'saving'}>{step === 'saving' ? 'Saving…' : 'Save my leaf'}</button>
           <button type="button" className="link" onClick={() => { setStep('pick'); setResult(null); }}>Start over</button>

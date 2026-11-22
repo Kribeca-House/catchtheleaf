@@ -1,6 +1,7 @@
 # Catch the leaf! Architecture
 
-Status: first version. Anything marked **GUESS** is a decision made without Rebeca's answer yet.
+Status: second version, with Rebeca's answers to the first round of questions (22 Nov 2026).
+Points marked (confirmed) are Rebeca's decisions; the rest are defaults that are easy to change.
 
 ## Goal
 
@@ -20,6 +21,7 @@ and climb three boards. Hosting must be cheap on Scaleway.
  (PostgreSQL, scales to zero)  photos + cut-outs, served straight from the bucket
                                ▲
                                └ Pl@ntNet API identifies the tree (free plan)
+ Scaleway Transactional Email ── password-reset links (only for accounts with an email)
 ```
 
 Why this shape:
@@ -43,6 +45,7 @@ Why this shape:
 | Serverless Containers | €0.000002 per GB-s and €0.00001 per vCPU-s, first 400,000 GB-s and 200,000 vCPU-s free each month | At 512 MB / 0.28 vCPU, scaling to zero: free for a friends-sized game. Kept always-on (no cold starts): roughly €7/month. |
 | Serverless SQL Database | Pay per use, scales to zero | I couldn't read the exact rate on the pricing page. At this data size expect a few euros a month at most; check before launch. |
 | Object Storage | Per GB stored plus egress | Not on the page I read. Each leaf is about 0.5 MB (photo + cut-out), so 10,000 leaves is about 5 GB: cents per month. |
+| Transactional Email | Pay per email, I didn't check the rate | Only password resets, so a handful a month. |
 | Pl@ntNet API | Free plan: 500 identifications a day, commercial use allowed | Enough for hundreds of players. Above that a Pro contract costs from €1,000/year, so the app degrades to "type the tree yourself" when the daily limit is hit. |
 
 Cold start: when the container has scaled to zero, the first request takes a second or two.
@@ -77,24 +80,25 @@ guess or type their own. We store whether the final name came from the guess (`a
 
 `server/src/db.js` creates the tables on start (no migration tool yet):
 
-- `users`: username (unique, case-insensitive), optional alias, scrypt password hash, hashed recovery
-  code, avatar, private flag.
-- `sessions`: hashed bearer tokens, 90 days.
-- `seasons`: start/end. **GUESS:** one season per year, 1 Sep to 30 Nov (UTC), northern hemisphere.
+- `users`: username (unique, case-insensitive), optional alias, optional email + scrypt password hash
+  (both or neither), avatar, private flag.
+- `sessions`: hashed bearer tokens, 400 days, extended whenever used.
+- `password_resets`: hashed one-hour, single-use reset tokens.
+- `seasons`: start/end. One season per year, 1 Sep to 30 Nov (UTC), the same for everyone (confirmed).
   Change with `SEASON_START` / `SEASON_END` or edit the rows.
-- `leaves`: owner, season, catch time, photo + cut-out keys, leaf colour, tree name / scientific name /
-  confidence / source, caption.
+- `leaves`: owner, season, catch time and where it came from (`photo` or `upload`), photo + cut-out
+  keys, leaf colour, tree name / scientific name / confidence / source, caption.
 - `friendships`: one row per pair, `pending` until accepted.
 - `groups`, `group_members`: a named subset of your friends, used to filter the boards.
 
 ## The three boards
 
-1. **First catch (this season).** **GUESS:** ranked by the time of each player's first leaf this
-   season, earliest first.
+1. **First catch (this season).** Ranked by the time of each player's first leaf this season,
+   earliest first (confirmed).
 2. **Leaf wealth (this season).** Most leaves; a tie goes to whoever reached that number first.
-3. **All time.** **GUESS:** for each season, season points = number of players that season − your
-   place + 1 (1st of 10 gets 10). Score = Σ (2 × season points + leaves that season), so a season place
-   counts double compared with a leaf.
+3. **All time** (Rebeca's rule). For each season, season points = active leaf catchers that season −
+   your place, so 1st of 30 gets 29 and 3rd gets 27. Score = Σ (2 × season points + leaves that
+   season): season points count double compared with leaves. Ties go to more season points.
 
 Filters: Everyone, Friends (you + your friends) or one of your groups. Places are renumbered inside the
 filter, so a friends board starts at #1. All-time scores are computed globally and then filtered.
@@ -102,32 +106,52 @@ filter, so a friends board starts at #1. All-time scores are computed globally a
 The boards are computed on request from the leaves table. That's fine to thousands of players; past
 that, cache them for a minute or store season results when a season ends.
 
-## Accounts without email
+## Accounts
 
-- Sign up with username + password (8+ characters) and an optional alias.
-- **Forgotten password:** a recovery code (`LEAF-XXXX-XXXX-XXXX`) is shown once at sign-up. Username +
-  code sets a new password, logs out every other device and issues a new code. Settings can issue a new
-  code. If someone loses both, only an admin can help (no admin screen yet).
-- Failed logins are throttled per username (8 tries per 15 minutes). This is per container instance,
-  so it slows guessing rather than stopping it; a shared limit would need Redis or a DB table.
+- Sign up with a username and an optional alias. **Email and password are optional, but go together:**
+  set both or neither.
+- **Without email + password** the account lives on the phone that made it. Its session lasts 400 days
+  and is extended whenever the app is used, so it doesn't lapse while someone plays. Logging out or
+  clearing the browser loses it, and the app warns about that. Settings offers "Add email and password"
+  at any time.
+- **With email + password** you can log in anywhere with username or email. "Forgot password?" emails a
+  one-hour, single-use link (Scaleway Transactional Email); using it logs out other devices. The answer
+  is the same whether or not the email exists, so it can't be used to discover accounts.
+- Failed logins are throttled per username or email (8 tries per 15 minutes). This is per container
+  instance, so it slows guessing rather than stopping it; a shared limit would need a DB table.
 
 ## Privacy
 
-- Profiles are public by default. **GUESS:** a private profile still appears on leaderboards
-  (name, alias, picture, score), but only friends see its leaves and friends list.
-- Image URLs are random and unlisted but not secret: anyone with a link can open it. Making photos of
-  private profiles truly private needs signed URLs (a small change).
-- Photos are re-encoded on the phone before upload, which drops EXIF data such as GPS location.
-- Deleting an account deletes its leaves, photos, friendships and groups.
+- A **private profile hides its profile picture** from everyone except its friends: on leaderboards,
+  in search, in lists and on the profile. Leaves, name and friends list stay visible (confirmed).
+- Image URLs are random and unlisted but not secret: anyone with a link can open it.
+- Photos are re-encoded on the phone before upload, which drops EXIF data such as GPS location. The
+  photo's date is read first and sent on its own.
+- Emails are never shown to other players.
+- Deleting an account deletes its leaves, photos and friendships; groups it owned pass to another member.
 
-## Cheating and evidence
+## Catch time and trust
 
-What's in: the catch time is the server's clock at upload, so nobody can backdate a catch; the photo is
-kept as evidence ("Original photo" on the card); uploads must be real JPEG/PNG/WebP under 6 MB.
+The catch time is **when the photo was taken** (confirmed): read on the phone from the photo's EXIF
+`DateTimeOriginal`, with its time zone when the phone records one. If the photo has no date, the file's
+date is used when it's clearly older than now, otherwise the upload time. A time in the future is
+ignored. The catch screen shows which time will be used. The leaf counts in the season its catch time
+falls in.
 
-What's not (open question): a photo doesn't prove the leaf was caught mid-air. Options: friends can
-flag a leaf; a leaf needs a "witness" friend to confirm it; a daily cap; duplicate-photo detection
-(perceptual hash) so the same leaf can't be uploaded twice.
+Players are trusted (confirmed): there's no flagging or witness step. The original photo is kept and
+shown on the card, and uploads must be real JPEG/PNG/WebP images under 6 MB.
+
+## Groups
+
+A group is a named set of the owner's friends, used to filter the boards. The owner adds and removes
+people (no invite to accept) and can delete it. **Anyone can leave**; when the owner leaves, another
+member becomes the owner, and an empty group is deleted.
+
+## Look
+
+Headings use El Messiri (Google Fonts). Body text uses Helvetica Neue, which is built into iPhones and
+Macs; it can't be served as a web font without a licence, so Android and Windows fall back to
+Helvetica or Arial. Card backs are the leaf's mirrored silhouette in khaki green (`#617257`).
 
 ## Deploying on Scaleway
 

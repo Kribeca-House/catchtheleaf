@@ -21,7 +21,6 @@ export function Friends({ username }) {
   const self = username.toLowerCase() === me.username.toLowerCase();
   const [tab, setTab] = useState('friends');
   const [friends, setFriends] = useState(null);
-  const [visible, setVisible] = useState(true);
   const [requests, setRequests] = useState({ incoming: [], outgoing: [] });
   const [groups, setGroups] = useState([]);
   const [term, setTerm] = useState('');
@@ -29,7 +28,7 @@ export function Friends({ username }) {
   const [error, setError] = useState('');
 
   const load = () => {
-    api(`/users/${encodeURIComponent(username)}/friends`).then((d) => { setFriends(d.friends); setVisible(d.visible); }).catch((e) => setError(e.message));
+    api(`/users/${encodeURIComponent(username)}/friends`).then((d) => setFriends(d.friends)).catch((e) => setError(e.message));
     if (self) {
       api('/friends/requests').then(setRequests).catch(() => {});
       api('/groups').then((d) => setGroups(d.groups)).catch(() => {});
@@ -45,6 +44,12 @@ export function Friends({ username }) {
 
   async function act(name, method) {
     try { await api(`/friends/${encodeURIComponent(name)}`, { method }); load(); } catch (e) { setError(e.message); }
+  }
+
+  async function leave(g) {
+    const note = g.is_owner && g.size > 1 ? ' Someone else in it becomes the owner.' : '';
+    if (!window.confirm(`Leave ${g.name}?${note}`)) return;
+    try { await api(`/groups/${g.id}/leave`, { method: 'POST' }); load(); } catch (e) { setError(e.message); }
   }
 
   const friendIds = new Set((friends || []).map((f) => f.id));
@@ -63,8 +68,7 @@ export function Friends({ username }) {
       <ErrorNote error={error} />
 
       {tab === 'friends' && (
-        !visible ? <Empty>This profile is private.</Empty>
-          : friends && !friends.length ? (
+        friends && !friends.length ? (
             <Empty>{self ? <>No friends yet. <button className="link" onClick={() => setTab('find')}>Find people</button></> : 'No friends yet.'}</Empty>
           ) : (
             <ul className="people">{(friends || []).map((f) => <PersonRow key={f.id} user={f} />)}</ul>
@@ -117,6 +121,7 @@ export function Friends({ username }) {
               <li key={g.id} className="person">
                 <span className="avatar avatar-letter group-badge"><Icon name="people" size={20} /></span>
                 <a className="who" href={`#/groups/${g.id}`}><strong>{g.name}</strong><small>{g.size} {g.size === 1 ? 'person' : 'people'}{g.is_owner ? ' · yours' : ''}</small></a>
+                <button className="link" onClick={() => leave(g)}>Leave</button>
               </li>
             ))}
           </ul>

@@ -3,19 +3,18 @@ import { api } from '../api.js';
 import { useSession } from '../App.jsx';
 import { resizeToJpeg } from '../cutout.js';
 import { Avatar, ErrorNote, TopBar } from '../ui.jsx';
-import { RecoveryCode } from './Auth.jsx';
 
 export function Settings() {
   const { user, setUser, signOut } = useSession();
   const [alias, setAlias] = useState(user.alias || '');
   const [msg, setMsg] = useState('');
   const [error, setError] = useState('');
-  const [pw, setPw] = useState({ current_password: '', new_password: '' });
-  const [code, setCode] = useState(null);
+  const [creds, setCreds] = useState({ email: user.email || '', current_password: '', new_password: '' });
   const fileRef = useRef(null);
 
   const done = (m) => { setMsg(m); setError(''); setTimeout(() => setMsg(''), 2500); };
   const oops = (e) => { setError(e.message); setMsg(''); };
+  const setC = (k) => (e) => setCreds({ ...creds, [k]: e.target.value });
 
   async function saveProfile(patch) {
     try { const d = await api('/me', { method: 'PATCH', json: patch }); setUser(d.user); done('Saved'); } catch (e) { oops(e); }
@@ -31,21 +30,23 @@ export function Settings() {
       setUser({ ...user, avatar: d.avatar }); done('New profile picture');
     } catch (err) { oops(err); }
   }
-  async function changePassword(e) {
+  async function saveCredentials(e) {
     e.preventDefault();
-    try { await api('/me/password', { method: 'POST', json: pw }); setPw({ current_password: '', new_password: '' }); done('Password changed'); } catch (err) { oops(err); }
-  }
-  async function newCode() {
-    if (!pw.current_password) { setError('Type your current password above first'); return; }
-    try { const d = await api('/me/recovery-code', { method: 'POST', json: { current_password: pw.current_password } }); setCode(d.recovery_code); } catch (err) { oops(err); }
+    try {
+      const d = await api('/me/credentials', { method: 'PUT', json: creds });
+      setUser(d.user);
+      setCreds({ email: d.user.email || '', current_password: '', new_password: '' });
+      done(user.has_password ? 'Saved' : 'Email and password added');
+    } catch (err) { oops(err); }
   }
   async function deleteAccount() {
-    const current_password = window.prompt('This deletes your account and all your leaves for good. Type your password to confirm.');
-    if (!current_password) return;
+    let current_password;
+    if (user.has_password) {
+      current_password = window.prompt('This deletes your account and all your leaves for good. Type your password to confirm.');
+      if (!current_password) return;
+    } else if (!window.confirm('This deletes your account and all your leaves for good. Delete it?')) return;
     try { await api('/me', { method: 'DELETE', json: { current_password } }); signOut(); } catch (err) { oops(err); }
   }
-
-  if (code) return <div className="settings"><RecoveryCode code={code} onDone={() => setCode(null)} /></div>;
 
   return (
     <div className="settings">
@@ -67,26 +68,33 @@ export function Settings() {
       <section>
         <label className="toggle">
           <input type="checkbox" checked={user.is_private} onChange={(e) => saveProfile({ is_private: e.target.checked })} />
-          <span>Private profile<small>You still appear on leaderboards, but only friends can see your leaves and friends.</small></span>
+          <span>Private profile<small>Only your friends see your profile picture. Your leaves stay visible to everyone.</small></span>
         </label>
       </section>
 
-      <form onSubmit={changePassword}>
-        <h3 className="section-title">Password</h3>
-        <label>Current password
-          <input type="password" value={pw.current_password} onChange={(e) => setPw({ ...pw, current_password: e.target.value })} autoComplete="current-password" />
+      <form onSubmit={saveCredentials}>
+        <h3 className="section-title">Email and password</h3>
+        {!user.has_password && (
+          <p className="notice">Your account only lives on this phone. Add an email and password to log in on other devices and to reset your password if you forget it.</p>
+        )}
+        <label>Email
+          <input type="email" value={creds.email} onChange={setC('email')} autoComplete="email" required={!user.has_password} />
         </label>
-        <label>New password
-          <input type="password" value={pw.new_password} onChange={(e) => setPw({ ...pw, new_password: e.target.value })} minLength={8} autoComplete="new-password" />
+        {user.has_password && (
+          <label>Current password
+            <input type="password" value={creds.current_password} onChange={setC('current_password')} autoComplete="current-password" required />
+          </label>
+        )}
+        <label>{user.has_password ? 'New password' : 'Password'} {user.has_password && <span className="hint">(leave empty to keep it)</span>}
+          <input type="password" value={creds.new_password} onChange={setC('new_password')} minLength={8} autoComplete="new-password" required={!user.has_password} />
         </label>
-        <div className="row">
-          <button className="button secondary" disabled={!pw.new_password}>Change password</button>
-          <button type="button" className="link" onClick={newCode}>Get a new recovery code</button>
-        </div>
+        <button className="button secondary">{user.has_password ? 'Save changes' : 'Add email and password'}</button>
       </form>
 
       <section className="danger-zone">
-        <button className="button secondary" onClick={signOut}>Log out</button>
+        <button className="button secondary" onClick={() => {
+          if (user.has_password || window.confirm("Your account has no password, so after logging out you can't log back in. Log out anyway?")) signOut();
+        }}>Log out</button>
         <button className="link danger" onClick={deleteAccount}>Delete my account</button>
       </section>
     </div>

@@ -28,19 +28,22 @@ async function call(method, path, { token, json, form } = {}) {
   return { status: res.status, body: await res.json().catch(() => null) };
 }
 
-async function signup(username) {
-  const r = await call('POST', '/api/auth/signup', { json: { username, password: 'autumnwind', alias: username.toUpperCase() } });
+async function signup(username, withCreds = true) {
+  const json = { username, alias: username.toUpperCase() };
+  if (withCreds) Object.assign(json, { email: `${username}@example.com`, password: 'autumnwind' });
+  const r = await call('POST', '/api/auth/signup', { json });
   assert.equal(r.status, 201, JSON.stringify(r.body));
   return r.body;
 }
 
-function leafForm(tree = 'Oak') {
+function leafForm(tree = 'Oak', caughtAt) {
   const f = new FormData();
   f.append('photo', new Blob([PNG], { type: 'image/png' }), 'p.png');
   f.append('cutout', new Blob([PNG], { type: 'image/png' }), 'c.png');
   f.append('tree_name', tree);
   f.append('caption', 'caught by the pond');
   f.append('colour', '#927b21');
+  if (caughtAt) f.append('caught_at', caughtAt);
   return f;
 }
 
@@ -51,34 +54,54 @@ before(async () => {
 });
 after(() => pool.end());
 
-test('scoring: placement counts double, leaves single', () => {
+test('scoring: season points = participants - place, counted double', () => {
   const s1 = [
     { user_id: 'a', first_at: '2025-09-02', last_at: '2025-10-01', leaves: 3 },
     { user_id: 'b', first_at: '2025-09-01', last_at: '2025-09-05', leaves: 1 },
   ];
   const [top, second] = allTimeScores(new Map([[1, s1]]));
-  assert.equal(top.user_id, 'b'); // 2 points x2 + 1 leaf = 5
-  assert.equal(top.score, 5);
-  assert.equal(second.score, 2 * 1 + 3);
+  // 2 players: b is 1st, 2 - 1 = 1 point -> 2 x 1 + 1 leaf = 3; a is 2nd, 0 points -> 0 + 3 leaves = 3.
+  // Tie goes to more season points.
+  assert.deepEqual([top.user_id, top.score, second.user_id, second.score], ['b', 3, 'a', 3]);
+  const thirty = Array.from({ length: 30 }, (_, i) => ({ user_id: `p${i}`, first_at: new Date(2025, 8, 1, 0, i).toISOString(), last_at: '2025-10-01', leaves: 0 }));
+  const scores = allTimeScores(new Map([[1, thirty]]));
+  assert.equal(scores.find((s) => s.user_id === 'p0').season_points, 29);
+  assert.equal(scores.find((s) => s.user_id === 'p2').season_points, 27);
   assert.equal(rankWealth(s1)[0].user_id, 'a');
 });
 
 test('full flow: sign up, catch leaves, friends, groups, boards, recovery', async () => {
   const ana = await signup('ana');
   const ben = await signup('ben');
-  const cal = await signup('cal');
-  assert.match(ana.recovery_code, /^LEAF-/);
+  const cal = await signup('cal', false); // username only: lives on this device
+  assert.equal(cal.user.has_password, false);
 
-  assert.equal((await call('POST', '/api/auth/signup', { json: { username: 'ANA', password: 'whateverxx' } })).status, 409);
-  assert.equal((await call('POST', '/api/auth/login', { json: { username: 'ana', password: 'nope' } })).status, 401);
-  assert.equal((await call('POST', '/api/auth/login', { json: { username: 'Ana', password: 'autumnwind' } })).status, 200);
+  assert.equal((await call('POST', '/api/auth/signup', { json: { username: 'ANA' } })).status, 409);
+  assert.equal((await call('POST', '/api/auth/signup', { json: { username: 'dee', email: 'dee@example.com' } })).status, 400);
+  assert.equal((await call('POST', '/api/auth/signup', { json: { username: 'dee', password: 'longenough' } })).status, 400);
+  assert.equal((await call('POST', '/api/auth/signup', { json: { username: 'dee', email: 'ANA@example.com', password: 'longenough' } })).status, 409);
+  assert.equal((await call('POST', '/api/auth/login', { json: { login: 'ana', password: 'nope' } })).status, 401);
+  assert.equal((await call('POST', '/api/auth/login', { json: { login: 'Ana', password: 'autumnwind' } })).status, 200);
+  assert.equal((await call('POST', '/api/auth/login', { json: { login: 'ana@EXAMPLE.com', password: 'autumnwind' } })).status, 200);
+  assert.equal((await call('POST', '/api/auth/login', { json: { login: 'cal', password: 'anything' } })).status, 401);
 
-  // ben catches first, ana catches two
-  assert.equal((await call('POST', '/api/leaves', { token: ben.token, form: leafForm('Maple') })).status, 201);
+  // cal adds email + password later
+  const credsRes = await call('PUT', '/api/me/credentials', { token: cal.token, json: { email: 'cal@example.com', new_password: 'calcalcal' } });
+  assert.equal(credsRes.body.user.has_password, true);
+  assert.equal((await call('POST', '/api/auth/login', { json: { login: 'cal', password: 'calcalcal' } })).status, 200);
+
+  // ben's photo was taken first (photo time), even though he uploads after ana
+  const early = new Date(Date.now() - 60 * 60_000).toISOString();
   await call('POST', '/api/leaves', { token: ana.token, form: leafForm() });
+  const benLeaf = await call('POST', '/api/leaves', { token: ben.token, form: leafForm('Maple', early) });
+  assert.equal(benLeaf.status, 201);
+  assert.equal(benLeaf.body.leaf.caught_at_source, 'photo');
+  assert.equal(new Date(benLeaf.body.leaf.caught_at).toISOString(), early);
+  // a photo time in the future falls back to the upload time
+  const future = await call('POST', '/api/leaves', { token: cal.token, form: leafForm('Oak', '2999-01-01T00:00:00Z') });
+  assert.equal(future.body.leaf.caught_at_source, 'upload');
   const up = await call('POST', '/api/leaves', { token: ana.token, form: leafForm() });
   assert.equal(up.status, 201);
-  await call('POST', '/api/leaves', { token: cal.token, form: leafForm() });
 
   // Uploading text pretending to be an image is refused
   const bad = new FormData();
@@ -111,14 +134,28 @@ test('full flow: sign up, catch leaves, friends, groups, boards, recovery', asyn
   assert.equal((await call('GET', `/api/leaderboards/alltime?scope=${g.body.id}`, { token: cal.token })).status, 404);
   assert.equal((await call('GET', `/api/leaderboards/alltime?scope=${g.body.id}`, { token: ben.token })).status, 200);
 
-  // private profile hides leaves from non-friends
+  // private profile hides the profile picture from non-friends, leaves stay visible
+  const av = new FormData();
+  av.append('avatar', new Blob([PNG], { type: 'image/png' }), 'a.png');
+  await call('POST', '/api/me/avatar', { token: ana.token, form: av });
   await call('PATCH', '/api/me', { token: ana.token, json: { is_private: true } });
   const asCal = await call('GET', '/api/users/ana', { token: cal.token });
-  assert.equal(asCal.body.visible, false);
-  assert.equal(asCal.body.leaves.length, 0);
+  assert.equal(asCal.body.user.avatar, null);
+  assert.equal(asCal.body.leaves.length, 2);
+  const calBoard = await call('GET', '/api/leaderboards/wealth', { token: cal.token });
+  assert.equal(calBoard.body.entries.find((e) => e.user.username === 'ana').user.avatar, null);
   const asBen = await call('GET', '/api/users/ana', { token: ben.token });
-  assert.equal(asBen.body.leaves.length, 2);
+  assert.ok(asBen.body.user.avatar);
   assert.equal(asBen.body.relation, 'friends');
+  assert.ok((await call('GET', '/api/me', { token: ana.token })).body.user.avatar);
+
+  // groups: anyone can leave; the owner leaving hands the group over
+  await call('POST', `/api/groups/${g.body.id}/leave`, { token: ana.token });
+  const handed = await call('GET', `/api/groups/${g.body.id}`, { token: ben.token });
+  assert.equal(handed.body.is_owner, true);
+  assert.deepEqual(handed.body.members.map((m) => m.username), ['ben']);
+  await call('POST', `/api/groups/${g.body.id}/leave`, { token: ben.token });
+  assert.equal((await call('GET', '/api/groups', { token: ben.token })).body.groups.length, 0);
 
   // only the owner edits a leaf
   const leafId = up.body.leaf.id;
@@ -127,13 +164,16 @@ test('full flow: sign up, catch leaves, friends, groups, boards, recovery', asyn
   assert.equal(edited.body.leaf.tree_name, 'English oak');
   assert.equal(edited.body.leaf.tree_source, 'user');
 
-  // forgotten password via recovery code
-  assert.equal((await call('POST', '/api/auth/recover', { json: { username: 'ana', recovery_code: 'LEAF-XXXX-XXXX-XXXX', new_password: 'newpassword' } })).status, 401);
-  const rec = await call('POST', '/api/auth/recover', { json: { username: 'ana', recovery_code: ana.recovery_code.toLowerCase(), new_password: 'newpassword' } });
+  // forgotten password via an emailed link (mail isn't configured in tests, so grab the token directly)
+  assert.equal((await call('POST', '/api/auth/forgot', { json: { email: 'nobody@example.com' } })).body.ok, true);
+  const { createResetToken } = await import('../src/auth.js');
+  const resetToken = await createResetToken(ana.user.id);
+  assert.equal((await call('POST', '/api/auth/reset', { json: { token: 'bogus', new_password: 'newpassword' } })).status, 400);
+  const rec = await call('POST', '/api/auth/reset', { json: { token: resetToken, new_password: 'newpassword' } });
   assert.equal(rec.status, 200);
-  assert.notEqual(rec.body.recovery_code, ana.recovery_code);
-  assert.equal((await call('GET', '/api/me', { token: ana.token })).status, 401); // old sessions are logged out
-  assert.equal((await call('POST', '/api/auth/login', { json: { username: 'ana', password: 'newpassword' } })).status, 200);
+  assert.equal((await call('POST', '/api/auth/reset', { json: { token: resetToken, new_password: 'again12345' } })).status, 400); // single use
+  assert.equal((await call('GET', '/api/me', { token: ana.token })).status, 401); // other sessions are logged out
+  assert.equal((await call('POST', '/api/auth/login', { json: { login: 'ana', password: 'newpassword' } })).status, 200);
 
   // identification without an API key degrades gracefully
   const idf = new FormData();

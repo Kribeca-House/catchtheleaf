@@ -15,13 +15,25 @@ create table if not exists users (
   id            uuid primary key,
   username      text not null,
   alias         text,
-  password_hash text not null,
-  recovery_hash text not null,
+  email         text,          -- optional; set together with a password
+  password_hash text,          -- optional; an account without one lives on the device that made it
   avatar_key    text,
   is_private    boolean not null default false,
   created_at    timestamptz not null default now()
 );
 create unique index if not exists users_username_lower on users (lower(username));
+-- upgrades for databases made by the first version
+alter table users add column if not exists email text;
+alter table users alter column password_hash drop not null;
+alter table users drop column if exists recovery_hash;
+create unique index if not exists users_email_lower on users (lower(email)) where email is not null;
+
+create table if not exists password_resets (
+  token_hash text primary key,
+  user_id    uuid not null references users(id) on delete cascade,
+  expires_at timestamptz not null,
+  used       boolean not null default false
+);
 
 create table if not exists sessions (
   token_hash text primary key,
@@ -41,7 +53,8 @@ create table if not exists leaves (
   id                 uuid primary key,
   user_id            uuid not null references users(id) on delete cascade,
   season_id          int references seasons(id),
-  caught_at          timestamptz not null default now(),
+  caught_at          timestamptz not null default now(), -- when the photo was taken (from the photo's EXIF)
+  caught_at_source   text not null default 'upload',      -- 'photo' = EXIF time, 'upload' = no photo time found
   photo_key          text not null,
   cutout_key         text not null,
   colour             text not null default '#617257',
@@ -52,6 +65,7 @@ create table if not exists leaves (
   caption            text not null default '',
   created_at         timestamptz not null default now()
 );
+alter table leaves add column if not exists caught_at_source text not null default 'upload';
 create index if not exists leaves_season_user on leaves (season_id, user_id, caught_at);
 create index if not exists leaves_user on leaves (user_id, caught_at desc);
 
@@ -83,7 +97,7 @@ export async function migrate() {
   await ensureCurrentSeason();
 }
 
-// GUESS: a season is autumn in the northern hemisphere, 1 Sep to 30 Nov (end exclusive = 1 Dec).
+// A season is autumn, 1 Sep to 30 Nov (end exclusive = 1 Dec), the same for everyone.
 // Override with SEASON_START=MM-DD and SEASON_END=MM-DD, or edit rows in the seasons table.
 export function seasonBounds(year) {
   const start = process.env.SEASON_START || '09-01';

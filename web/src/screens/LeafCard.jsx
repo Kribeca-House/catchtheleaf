@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { api, displayName, formatDate, textOn, COMMON_TREES } from '../api.js';
+import { api, displayName, formatDate, COMMON_TREES } from '../api.js';
 import { ErrorNote, Icon } from '../ui.jsx';
 
-// A leaf opens as a card. Tap to flip: the back is the leaf's mirrored silhouette in one solid colour,
+// A leaf opens as a card. Tap to flip: the back is the leaf's mirrored silhouette in khaki green,
 // with the tree, the date and the caption.
 export function LeafCard({ leaf, owner, canEdit, onClose, onChanged, onDeleted }) {
   const [flipped, setFlipped] = useState(false);
@@ -29,8 +29,6 @@ export function LeafCard({ leaf, owner, canEdit, onClose, onChanged, onDeleted }
     try { await api(`/leaves/${leaf.id}`, { method: 'DELETE' }); onDeleted(leaf.id); } catch (err) { setError(err.message); }
   }
 
-  const ink = textOn(leaf.colour);
-
   return (
     <div className="modal" role="dialog" aria-modal="true" aria-label={`${leaf.tree_name} leaf`} onClick={onClose}>
       <div className="card-stage" onClick={(e) => e.stopPropagation()}>
@@ -40,10 +38,10 @@ export function LeafCard({ leaf, owner, canEdit, onClose, onChanged, onDeleted }
             <img src={leaf.cutout} alt={`${leaf.tree_name} leaf caught by ${displayName(owner)}`} />
             <span className="front-label">{leaf.tree_name}</span>
           </div>
-          <div className="face back" style={{ background: '#fbf7f5' }}>
-            <div className="silhouette" style={{ backgroundColor: leaf.colour, WebkitMaskImage: `url("${leaf.cutout}")`, maskImage: `url("${leaf.cutout}")` }} />
+          <div className="face back">
+            <div className="silhouette" style={{ WebkitMaskImage: `url("${leaf.cutout}")`, maskImage: `url("${leaf.cutout}")` }} />
             <div className="back-text">
-              <span className="tree-pill" style={{ background: leaf.colour, color: ink }}>{leaf.tree_name}</span>
+              <span className="tree-pill">{leaf.tree_name}</span>
               {leaf.tree_scientific && <em className="scientific">{leaf.tree_scientific}</em>}
               <time dateTime={leaf.caught_at}>Caught {formatDate(leaf.caught_at, true)}</time>
               {leaf.caption && <p className="caption">“{leaf.caption}”</p>}

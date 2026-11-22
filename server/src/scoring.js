@@ -11,17 +11,17 @@ export function rankWealth(rows) {
   return [...rows].sort((a, b) => b.leaves - a.leaves || new Date(a.last_at) - new Date(b.last_at));
 }
 
-// Board 3, "all time". GUESS at the formula, waiting on Rebeca:
-//   season points = players that season - your place + 1   (1st of 10 gets 10, last gets 1)
+// Board 3, "all time" (Rebeca's rule):
+//   season points = active leaf catchers that season - your place   (1st of 30 gets 29, 3rd gets 27, last gets 0)
 //   score         = sum over seasons of (2 x season points + leaves caught that season)
-// so a place on the season board counts double compared with one leaf.
+// so season points count double compared with leaves.
 export function allTimeScores(seasonRows) {
   const totals = new Map();
   for (const rows of seasonRows.values()) {
     const ranked = rankFirstCatch(rows);
     ranked.forEach((r, i) => {
       const t = totals.get(r.user_id) || { user_id: r.user_id, score: 0, season_points: 0, leaves: 0, seasons: 0 };
-      t.season_points += ranked.length - i;
+      t.season_points += ranked.length - (i + 1);
       t.leaves += Number(r.leaves);
       t.seasons += 1;
       t.score = 2 * t.season_points + t.leaves;

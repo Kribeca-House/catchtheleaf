@@ -5,7 +5,7 @@ import { Empty, ErrorNote, Icon, PlayerLink } from '../ui.jsx';
 const BOARDS = [
   { id: 'season', label: 'First catch', blurb: 'Who caught their first leaf earliest this season' },
   { id: 'wealth', label: 'Leaf wealth', blurb: 'Most leaves caught this season' },
-  { id: 'alltime', label: 'All time', blurb: 'Every season: season places count double, plus one point per leaf' },
+  { id: 'alltime', label: 'All time', blurb: 'Each season: (players − your place) × 2, plus 1 point per leaf' },
 ];
 
 function remember(key, fallback) {

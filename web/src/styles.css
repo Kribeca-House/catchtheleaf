@@ -4,14 +4,15 @@
   --stone: #eceae4;   /* surfaces, cards */
   --teal: #00364a;    /* primary: headings, nav, buttons */
   --ochre: #927b21;   /* leaf gold: accents, 1st place */
-  --sage: #617257;    /* secondary text, 2nd place */
+  --sage: #617257;    /* khaki green: secondary text, card backs */
   --red: #fa2107;     /* the catch button, alerts */
   --ink: #2d2b1a;     /* body text */
   --line: #dcd8ce;
   --radius: 16px;
   --nav-h: 72px;
-  --serif: 'Fraunces', Georgia, serif;
-  --sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --serif: 'El Messiri', Georgia, serif; /* headings */
+  /* Helvetica Neue is built into iPhones and Macs; other devices fall back to Helvetica/Arial. */
+  --sans: 'Helvetica Neue', Helvetica, Arial, sans-serif;
   color-scheme: light;
 }
 
@@ -176,12 +177,12 @@ input:focus, textarea:focus { outline: 2px solid var(--ochre); outline-offset: 1
 .face.front { background: var(--stone); }
 .face.front img { flex: 1; min-height: 0; width: 100%; object-fit: contain; filter: drop-shadow(0 8px 10px rgba(45, 43, 26, .3)); }
 .front-label { font-family: var(--serif); color: var(--teal); font-size: 1.1rem; margin-top: 10px; }
-.face.back { transform: rotateY(180deg); justify-content: flex-start; }
-/* The flipped leaf: the cut-out used as a mask, mirrored, filled with the leaf's own colour. */
-.silhouette { width: 100%; flex: 1; min-height: 0; transform: scaleX(-1);
+.face.back { transform: rotateY(180deg); justify-content: flex-start; background: var(--paper); }
+/* The flipped leaf: the cut-out used as a mask, mirrored, filled with khaki green. */
+.silhouette { width: 100%; flex: 1; min-height: 0; transform: scaleX(-1); background-color: var(--sage);
   -webkit-mask-size: contain; mask-size: contain; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: center; mask-position: center; }
 .back-text { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; padding-top: 14px; color: var(--ink); }
-.tree-pill { font-family: var(--serif); font-weight: 700; font-size: 1.2rem; padding: 6px 16px; border-radius: 999px; }
+.tree-pill { font-family: var(--serif); font-weight: 700; font-size: 1.2rem; padding: 6px 16px; border-radius: 999px; background: var(--sage); color: var(--paper); }
 .scientific { color: var(--sage); font-size: .85rem; }
 .back-text time { font-size: .85rem; color: var(--sage); }
 .caption { margin: 4px 0 0; font-family: var(--serif); font-style: italic; color: var(--teal); }
@@ -210,3 +211,12 @@ input:focus, textarea:focus { outline: 2px solid var(--ochre); outline-offset: 1
 .toggle input { width: 22px; height: 22px; margin-top: 2px; accent-color: var(--teal); }
 .toggle small { display: block; color: var(--sage); font-weight: 400; margin-top: 2px; }
 .danger-zone { display: flex; justify-content: space-between; align-items: center; border: 0 !important; }
+
+.optional-creds { margin-top: 14px; border: 1.5px dashed var(--line); border-radius: var(--radius); padding: 4px 14px 14px; }
+.optional-creds summary { cursor: pointer; font-weight: 600; color: var(--teal); padding: 10px 0 4px; }
+.optional-creds p { margin: 4px 0 0; }
+.notice { background: #fbf6e6; border: 1px solid var(--ochre); border-radius: var(--radius); padding: 12px 14px; font-size: .9rem; }
+.notice a { font-weight: 600; }
+.group-exit { justify-content: space-between; margin-top: 8px; }
+.group-exit .button { width: auto; margin-top: 0; }
+.group-editor > .button.secondary { margin-top: 16px; }

@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { api, getToken, setToken } from './api.js';
-import { Auth } from './screens/Auth.jsx';
+import { Auth, ResetPassword } from './screens/Auth.jsx';
 import { Leaderboard } from './screens/Leaderboard.jsx';
 import { Profile } from './screens/Profile.jsx';
 import { Friends } from './screens/Friends.jsx';
@@ -41,10 +41,11 @@ export default function App() {
     setToken(null); setUser(null); go('/');
   }, []);
 
+  const [first, second, third] = route;
+  if (first === 'reset' && second) return <ResetPassword token={second} onSignedIn={signIn} />;
   if (loading) return <div className="splash"><Icon name="leaf" size={48} /></div>;
   if (!user) return <Auth onSignedIn={signIn} />;
 
-  const [first, second, third] = route;
   let screen;
   let tab = 'board';
   if (first === 'u' && second && third === 'friends') { screen = <Friends key={second} username={second} />; tab = second === user.username ? 'profile' : 'board'; }
