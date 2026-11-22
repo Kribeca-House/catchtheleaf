@@ -1,0 +1,18 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: catchtheleaf
+    ports: ["5432:5432"]
+    volumes: [db:/var/lib/postgresql/data]
+  app:
+    build: .
+    depends_on: [db]
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@db:5432/catchtheleaf
+      MEDIA_DIR: /tmp/media
+      PLANTNET_API_KEY: ${PLANTNET_API_KEY:-}
+    ports: ["8080:8080"]
+volumes:
+  db:

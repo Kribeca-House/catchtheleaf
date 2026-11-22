@@ -1,0 +1,55 @@
+name: Test, build and deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env: { POSTGRES_PASSWORD: postgres, POSTGRES_DB: catchtheleaf_test }
+        ports: ["5432:5432"]
+        options: --health-cmd pg_isready --health-interval 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci && npm test
+        working-directory: server
+      - run: npm ci && npm run build
+        working-directory: web
+
+  # Needs repository secrets SCW_SECRET_KEY and SCW_REGISTRY (e.g. rg.fr-par.scw.cloud/my-namespace),
+  # and optionally SCW_CONTAINER_ID + SCW_REGION to redeploy the Serverless Container.
+  deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+      SCW_REGISTRY: ${{ secrets.SCW_REGISTRY }}
+      SCW_CONTAINER_ID: ${{ secrets.SCW_CONTAINER_ID }}
+      SCW_REGION: ${{ secrets.SCW_REGION || 'fr-par' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Skip when Scaleway isn't set up yet
+        if: env.SCW_SECRET_KEY == '' || env.SCW_REGISTRY == ''
+        run: echo "Set SCW_SECRET_KEY and SCW_REGISTRY to enable deploys." && exit 0
+      - name: Build and push image
+        if: env.SCW_SECRET_KEY != '' && env.SCW_REGISTRY != ''
+        run: |
+          echo "$SCW_SECRET_KEY" | docker login "${SCW_REGISTRY%%/*}" -u nologin --password-stdin
+          docker build -t "$SCW_REGISTRY/catch-the-leaf:${GITHUB_SHA}" -t "$SCW_REGISTRY/catch-the-leaf:latest" .
+          docker push --all-tags "$SCW_REGISTRY/catch-the-leaf"
+      - name: Redeploy container
+        if: env.SCW_SECRET_KEY != '' && env.SCW_CONTAINER_ID != ''
+        run: |
+          curl -fsS -X PATCH \
+            -H "X-Auth-Token: $SCW_SECRET_KEY" -H "Content-Type: application/json" \
+            -d "{\"registry_image\": \"$SCW_REGISTRY/catch-the-leaf:${GITHUB_SHA}\", \"redeploy\": true}" \
+            "https://api.scaleway.com/containers/v1beta1/regions/$SCW_REGION/containers/$SCW_CONTAINER_ID"

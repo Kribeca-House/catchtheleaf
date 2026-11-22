@@ -1,0 +1,9 @@
+{
+  "name": "Catch the leaf!",
+  "short_name": "Catch the leaf",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fbf7f5",
+  "theme_color": "#fbf7f5",
+  "icons": [{ "src": "/leaf.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
