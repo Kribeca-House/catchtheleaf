@@ -26,7 +26,7 @@ const uid = () => `demo-${++n}-${Math.random().toString(36).slice(2, 8)}`;
 
 const year = new Date().getFullYear();
 const S = {
-  users: [], sessions: new Map(), leaves: [], friendships: [], groups: [],
+  users: [], sessions: new Map(), leaves: [], friendships: [], groups: [], likes: [], comments: [],
   seasons: [
     { id: 1, name: `Autumn ${year - 1}`, starts_at: new Date(`${year - 1}-09-01T00:00:00Z`), ends_at: new Date(`${year - 1}-12-01T00:00:00Z`) },
     { id: 2, name: `Autumn ${year}`, starts_at: new Date(`${year}-09-01T00:00:00Z`), ends_at: new Date(`${year}-12-01T00:00:00Z`) },
@@ -72,6 +72,13 @@ addLeaf(ines, 'Birch', `${year}-10-19T09:00:00Z`, 'My first ever!');
 addLeaf(benji, 'Norway maple', `${year}-10-30T14:20:00Z`, '');
 addLeaf(theo, 'Oak', `${year}-11-02T13:05:00Z`, '');
 addLeaf(benji, 'Beech', `${year}-11-09T08:30:00Z`, 'Caught it with my hat');
+// a little chatter on the back of Mila's bus-stop maple
+{
+  const bus = S.leaves.find((l) => l.caption.startsWith('Snatched'));
+  for (const who of [benji, juno, oscar]) S.likes.push({ leaf_id: bus.id, user_id: who.id });
+  S.comments.push({ id: uid(), leaf_id: bus.id, user_id: juno.id, body: 'The bus stop roof?! Legend', created_at: `${year}-09-08T09:02:00Z` });
+  S.comments.push({ id: uid(), leaf_id: bus.id, user_id: benji.id, body: 'Rematch tomorrow', created_at: `${year}-09-08T12:40:00Z` });
+}
 befriend(mila, juno);
 befriend(benji, oscar);
 befriend(theo, mila);
@@ -308,6 +315,32 @@ export async function mockApi(path, { method = 'GET', json, form, token } = {}) 
     };
     S.leaves.push(leaf);
     return { leaf, counted: Boolean(season) };
+  }
+  // likes and comments
+  if (seg[0] === 'comments' && seg[1] && method === 'DELETE') {
+    const c = S.comments.find((x) => x.id === seg[1]) || fail(404, 'No such comment');
+    const leaf = S.leaves.find((l) => l.id === c.leaf_id);
+    if (c.user_id !== u.id && leaf?.user_id !== u.id) fail(404, 'No such comment');
+    S.comments = S.comments.filter((x) => x !== c);
+    return { ok: true };
+  }
+  if (seg[0] === 'leaves' && seg[1] && seg[2]) {
+    const leaf = S.leaves.find((l) => l.id === seg[1]) || fail(404, 'No such leaf');
+    const likeState = () => ({ likes: S.likes.filter((x) => x.leaf_id === leaf.id).length, liked: S.likes.some((x) => x.leaf_id === leaf.id && x.user_id === u.id) });
+    const shown = (c) => ({ id: c.id, body: c.body, created_at: c.created_at, user: publicUser(S.users.find((x) => x.id === c.user_id), circleOf(u.id)), can_delete: c.user_id === u.id || leaf.user_id === u.id });
+    if (seg[2] === 'social') return { ...likeState(), comments: S.comments.filter((c) => c.leaf_id === leaf.id && S.users.some((x) => x.id === c.user_id)).map(shown) };
+    if (seg[2] === 'like') {
+      S.likes = S.likes.filter((x) => !(x.leaf_id === leaf.id && x.user_id === u.id));
+      if (method === 'PUT') S.likes.push({ leaf_id: leaf.id, user_id: u.id });
+      return likeState();
+    }
+    if (seg[2] === 'comments' && method === 'POST') {
+      const text = String(body.body || '').trim().slice(0, 500);
+      if (!text) fail(400, 'Write something first');
+      const c = { id: uid(), leaf_id: leaf.id, user_id: u.id, body: text, created_at: new Date().toISOString() };
+      S.comments.push(c);
+      return { comment: shown(c) };
+    }
   }
   if (seg[0] === 'leaves' && seg[1]) {
     const leaf = S.leaves.find((l) => l.id === seg[1] && l.user_id === u.id) || fail(404, 'No such leaf');

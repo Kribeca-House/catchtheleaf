@@ -535,6 +535,75 @@ export function createApp() {
     return c.json({ ok: true });
   });
 
+  // ---------- likes and comments (the back of a leaf card) ----------
+
+  async function leafById(id) {
+    if (!/^[0-9a-f-]{36}$/i.test(id)) fail(404, 'No such leaf');
+    const { rows } = await q('select * from leaves where id = $1', [id]);
+    return rows[0] || fail(404, 'No such leaf');
+  }
+  async function likeState(leafId, userId) {
+    const { rows: [r] } = await q(
+      `select count(*)::int as likes, bool_or(user_id = $2) as liked from leaf_likes where leaf_id = $1`, [leafId, userId]);
+    return { likes: r.likes, liked: Boolean(r.liked) };
+  }
+  const publicComment = (row, viewer, leaf, circle) => ({
+    id: row.id, body: row.body, created_at: row.created_at,
+    user: publicUser({ ...row, id: row.user_id }, circle),
+    // You can delete your own comments, and any comment on your own leaf.
+    can_delete: row.user_id === viewer.id || leaf.user_id === viewer.id,
+  });
+
+  app.get('/api/leaves/:id/social', async (c) => {
+    const u = me(c);
+    const leaf = await leafById(c.req.param('id'));
+    const [state, comments, circle] = await Promise.all([
+      likeState(leaf.id, u.id),
+      q(`select lc.*, us.username, us.alias, us.is_private, us.avatar_key
+           from leaf_comments lc join users us on us.id = lc.user_id
+          where lc.leaf_id = $1 order by lc.created_at`, [leaf.id]),
+      viewerCircle(u.id),
+    ]);
+    return c.json({ ...state, comments: comments.rows.map((r) => publicComment(r, u, leaf, circle)) });
+  });
+
+  app.put('/api/leaves/:id/like', async (c) => {
+    const u = me(c);
+    const leaf = await leafById(c.req.param('id'));
+    await q('insert into leaf_likes (leaf_id, user_id) values ($1, $2) on conflict do nothing', [leaf.id, u.id]);
+    return c.json(await likeState(leaf.id, u.id));
+  });
+
+  app.delete('/api/leaves/:id/like', async (c) => {
+    const u = me(c);
+    const leaf = await leafById(c.req.param('id'));
+    await q('delete from leaf_likes where leaf_id = $1 and user_id = $2', [leaf.id, u.id]);
+    return c.json(await likeState(leaf.id, u.id));
+  });
+
+  app.post('/api/leaves/:id/comments', async (c) => {
+    const u = me(c);
+    const leaf = await leafById(c.req.param('id'));
+    const { body } = await c.req.json().catch(() => ({}));
+    const text = String(body || '').trim().slice(0, 500);
+    if (!text) fail(400, 'Write something first');
+    const { rows: [row] } = await q(
+      'insert into leaf_comments (id, leaf_id, user_id, body) values ($1,$2,$3,$4) returning *',
+      [randomUUID(), leaf.id, u.id, text]);
+    return c.json({ comment: publicComment({ ...u, ...row }, u, leaf, new Set([u.id])) }, 201);
+  });
+
+  app.delete('/api/comments/:id', async (c) => {
+    const u = me(c);
+    const id = c.req.param('id');
+    if (!/^[0-9a-f-]{36}$/i.test(id)) fail(404, 'No such comment');
+    const { rows } = await q(
+      `delete from leaf_comments lc using leaves l
+        where lc.id = $1 and l.id = lc.leaf_id and (lc.user_id = $2 or l.user_id = $2) returning lc.id`, [id, u.id]);
+    if (!rows.length) fail(404, 'No such comment');
+    return c.json({ ok: true });
+  });
+
   // Local development only: media served from disk. In production the bucket serves images.
   app.get('/media/*', async (c) => {
     const key = decodeURIComponent(c.req.path.slice('/media/'.length));

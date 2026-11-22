@@ -90,6 +90,22 @@ create table if not exists group_members (
   user_id  uuid not null references users(id) on delete cascade,
   primary key (group_id, user_id)
 );
+
+-- Likes and comments on the back of a leaf card.
+create table if not exists leaf_likes (
+  leaf_id    uuid not null references leaves(id) on delete cascade,
+  user_id    uuid not null references users(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (leaf_id, user_id)
+);
+create table if not exists leaf_comments (
+  id         uuid primary key,
+  leaf_id    uuid not null references leaves(id) on delete cascade,
+  user_id    uuid not null references users(id) on delete cascade,
+  body       text not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists leaf_comments_leaf on leaf_comments (leaf_id, created_at);
 `;
 
 export async function migrate() {

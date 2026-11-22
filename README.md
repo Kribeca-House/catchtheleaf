@@ -4,8 +4,8 @@ Leaderboards for the real-life autumn game: catch a falling leaf, photograph it,
 
 - **Leaderboard:** First catch this season, Leaf wealth this season, All time. Filter by everyone,
   friends, or your own groups.
-- **Profile:** your leaves as cut-outs scattered on the page. Tap one and it flips to show its mirrored
-  silhouette in khaki green, with the tree, the date and the caption.
+- **Profile:** your leaves as cut-outs scattered on the page. Tap one and it opens as a card: the cut-out
+  on the front, and on the back the original photo with the tree, the date, the caption, likes and comments.
 - **Catch a leaf:** take a photo, the leaf is cut out on the phone, the tree is guessed (Pl@ntNet), you
   fix it if you know better and add a caption.
 - **Friends:** requests, search, see anyone's friends, make and leave groups.
@@ -53,8 +53,9 @@ Create the test database once: `docker compose exec db createdb -U postgres catc
 1. **Database:** create a Serverless SQL Database. Copy its connection string into `DATABASE_URL` and set
    `DATABASE_SSL=true`.
 2. **Bucket:** create an Object Storage bucket (e.g. `catch-the-leaf-media` in `fr-par`). Create an API key
-   with Object Storage access for `S3_ACCESS_KEY` / `S3_SECRET_KEY`. Add a CORS rule allowing `GET` from
-   your app's domain (the leaf card uses the cut-out as a CSS mask, which needs CORS).
+   with Object Storage access for `S3_ACCESS_KEY` / `S3_SECRET_KEY`. No CORS rule is needed: the app only
+   shows the images, it never reads their pixels. Optional: set `S3_STORAGE_CLASS=ONEZONE_IA` for cheaper
+   One Zone storage.
 3. **Image:** create a Container Registry namespace, then:
    ```sh
    docker build -t rg.fr-par.scw.cloud/<namespace>/catch-the-leaf:latest .

@@ -164,6 +164,27 @@ test('full flow: sign up, catch leaves, friends, groups, boards, recovery', asyn
   assert.equal(edited.body.leaf.tree_name, 'English oak');
   assert.equal(edited.body.leaf.tree_source, 'user');
 
+  // likes and comments on the back of the card
+  const like = await call('PUT', `/api/leaves/${leafId}/like`, { token: ben.token });
+  assert.deepEqual(like.body, { likes: 1, liked: true });
+  await call('PUT', `/api/leaves/${leafId}/like`, { token: ben.token }); // liking twice still counts once
+  assert.deepEqual((await call('PUT', `/api/leaves/${leafId}/like`, { token: ana.token })).body, { likes: 2, liked: true });
+  assert.deepEqual((await call('DELETE', `/api/leaves/${leafId}/like`, { token: ana.token })).body, { likes: 1, liked: false });
+  assert.equal((await call('POST', `/api/leaves/${leafId}/comments`, { token: ben.token, json: { body: '   ' } })).status, 400);
+  const benSays = await call('POST', `/api/leaves/${leafId}/comments`, { token: ben.token, json: { body: 'what a catch' } });
+  assert.equal(benSays.status, 201);
+  assert.equal(benSays.body.comment.user.username, 'ben');
+  const calSays = await call('POST', `/api/leaves/${leafId}/comments`, { token: cal.token, json: { body: 'lucky!' } });
+  const social = await call('GET', `/api/leaves/${leafId}/social`, { token: cal.token });
+  assert.equal(social.body.likes, 1);
+  assert.equal(social.body.liked, false);
+  assert.deepEqual(social.body.comments.map((x) => [x.body, x.can_delete]), [['what a catch', false], ['lucky!', true]]);
+  // ben can't delete cal's comment; ana owns the leaf so she can
+  assert.equal((await call('DELETE', `/api/comments/${calSays.body.comment.id}`, { token: ben.token })).status, 404);
+  assert.equal((await call('DELETE', `/api/comments/${calSays.body.comment.id}`, { token: ana.token })).status, 200);
+  assert.equal((await call('GET', `/api/leaves/${leafId}/social`, { token: ben.token })).body.comments.length, 1);
+  assert.equal((await call('GET', '/api/leaves/not-a-leaf/social', { token: ben.token })).status, 404);
+
   // forgotten password via an emailed link (mail isn't configured in tests, so grab the token directly)
   assert.equal((await call('POST', '/api/auth/forgot', { json: { email: 'nobody@example.com' } })).body.ok, true);
   const { createResetToken } = await import('../src/auth.js');

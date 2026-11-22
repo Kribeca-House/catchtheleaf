@@ -29,6 +29,8 @@ export async function put(key, bytes, contentType) {
     await s3.send(new PutObjectCommand({
       Bucket: process.env.S3_BUCKET, Key: key, Body: bytes, ContentType: contentType,
       ACL: 'public-read', CacheControl: 'public, max-age=31536000, immutable',
+      // Optional cheaper class, e.g. ONEZONE_IA (Scaleway One Zone). Unset = Standard.
+      ...(process.env.S3_STORAGE_CLASS ? { StorageClass: process.env.S3_STORAGE_CLASS } : {}),
     }));
   } else {
     const path = localPath(key);

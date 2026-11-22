@@ -14,10 +14,14 @@ const PATHS = {
   check: 'M5 12l5 5 9-10',
   plus: 'M12 5v14M5 12h14',
   close: 'M6 6l12 12M18 6 6 18',
+  heart: 'M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.3a4.3 4.3 0 0 1 7.5 2.5C19.5 15.4 12 20 12 20z',
+  comment: 'M4 5h16v11H10l-4 3.5V16H4z',
+  send: 'M4 12l16-8-6 16-2.5-6.5z',
+  trash: 'M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13',
 };
 
-export function Icon({ name, size = 24 }) {
-  const filled = name === 'leaf';
+export function Icon({ name, size = 24, filled: fill = false }) {
+  const filled = fill || name === 'leaf';
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" className={`icon icon-${name}`}
       fill={filled ? 'currentColor' : 'none'} stroke={filled ? 'none' : 'currentColor'} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
