@@ -151,11 +151,11 @@ member becomes the owner, and an empty group is deleted.
 
 Headings use El Messiri (Google Fonts). Body text uses Helvetica Neue, which is built into iPhones and
 Macs; it can't be served as a web font without a licence, so Android and Windows fall back to
-Helvetica or Arial. Card backs are the leaf's mirrored silhouette in khaki green (`#617257`).
+Helvetica or Arial. A leaf card shows the cut-out on the front; the back shows the original photo, the tree, the date, the caption, likes and comments (anyone signed in can like and comment; you can delete your own comments and any comment on your own leaf).
 
 ## Deploying on Scaleway
 
 See `README.md` for the steps. In short: build the Docker image, push it to Scaleway Container
 Registry, create a Serverless Container from it with the environment variables in `.env.example`,
-create a Serverless SQL Database and an Object Storage bucket (public-read objects, CORS allowing your
-app's domain so the card's leaf silhouette mask can load).
+create a Serverless SQL Database and an Object Storage bucket (public-read objects; no CORS needed,
+the app only displays the images).
